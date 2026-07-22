@@ -3,7 +3,64 @@ from pywinauto.keyboard import send_keys
 import win32clipboard
 import time
 import pandas as pd
+import json
+import os
+import csv
 
+ARCHIVO_PROGRESO = "progreso.json"
+ARCHIVO_REPORTE = "reporte_asientos.csv"
+
+def inicializar_reporte():
+    if not os.path.exists(ARCHIVO_REPORTE):
+        with open(ARCHIVO_REPORTE, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["RUC", "Empresa", "Año", "Asiento", "Estado", "Observación"])
+
+def registrar_reporte(ruc, nombre_empresa, anio, asiento, estado, observacion=""):
+    inicializar_reporte()
+    try:
+        with open(ARCHIVO_REPORTE, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([ruc, nombre_empresa, anio, asiento, estado, observacion])
+    except Exception as e:
+        print(f"Error registrando en el reporte: {e}")
+
+
+
+def cargar_progreso():
+    if os.path.exists(ARCHIVO_PROGRESO):
+        try:
+            with open(ARCHIVO_PROGRESO, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error cargando progreso: {e}")
+            return {}
+    return {}
+
+def guardar_progreso(progreso):
+    try:
+        with open(ARCHIVO_PROGRESO, "w", encoding="utf-8") as f:
+            json.dump(progreso, f, indent=4)
+    except Exception as e:
+        print(f"Error guardando progreso: {e}")
+
+def registrar_asiento_procesado(ruc, anio, asiento):
+    progreso = cargar_progreso()
+    if ruc not in progreso:
+        progreso[ruc] = {}
+    
+    anio_str = str(anio)
+    if anio_str not in progreso[ruc]:
+        progreso[ruc][anio_str] = []
+        
+    if asiento not in progreso[ruc][anio_str]:
+        progreso[ruc][anio_str].append(asiento)
+        guardar_progreso(progreso)
+
+def es_asiento_procesado(ruc, anio, asiento):
+    progreso = cargar_progreso()
+    anio_str = str(anio)
+    return ruc in progreso and anio_str in progreso[ruc] and asiento in progreso[ruc][anio_str]
 
 ruta_exe = (
     r"C:\Ejecutable ContaNet ERP 3.0.7.44 - SOUTHERN"
@@ -14,21 +71,43 @@ directorio_trabajo = (
     r"C:\Ejecutable ContaNet ERP 3.0.7.44 - SOUTHERN"
 )
 
-empresas = {
-    "20603941340": "TEXTILE SOLUTIONS S.A.C.",
-    "20504334041": "INTEGRATED TEXTILE SOLUTIONS SAC",
-    "20506883301": "CMT DEL SUR SAC",
-    "20600692781": "INVERSIONES DIONISO SAC",
-    "20518220641": "G & S INTERNATIONAL TEXCORP SAC",
-    "20514016624": "DYNAMITEX SOCIEDAD ANONIMA CERRADA",
-    "20606955724": "STN PERU COMMERCE S.A.C.",
-    "20494530865": "DINSURA SAC",
-    "20376729126": "SOUTHERN TEXTILE NETWORK SAC",
-    "20490242407": "INVERSIONES FORESTALES DEL SUR S.A.C.",
-    "20503682118": "THIMBLE SOURCING SAC",
-    "20542813238": "REFORESTADORA IÑAPARI SAC",
-    "20609254778": "TECA PERUVIAN GROUP S.A.C.",
+EXCEL_FILE = r"\\192.168.30.36\Tesoreria\TESORERIA\CONSTANCIAS DE PAGO\constancias_de_pago.xlsx"
+
+excel_data = pd.read_excel(
+    EXCEL_FILE,
+    sheet_name=None
+)
+
+hojas_excel = {
+    "20506883301": "CMT",
+    "20600692781": "DIONISO",
+    "20514016624": "DYNAMITEX",
+    "20490242407": "INFOSUR",
+    "20494530865": "DINSURA",
+    "20606955724": "PERU COMMERCE",
+    "20376729126": "STN",
+    "20504334041": "ITS",
+    "20609254778": "TECA",
+    "20542813238": "IÑAPARI"
 }
+
+
+empresas = {
+    "20376729126": "STN",
+    "20506883301": "CMT",
+    "20504334041": "ITS",
+    "20600692781": "DIONISO",
+    "20514016624": "DYNAMITEX",
+    "20606955724": "PERU COMMERCE",
+    "20603941340": "TEXTIL SOLUTIONS",
+    "20494530865": "DINSURA",
+    "20490242407": "INFOSUR",
+    "20542813238": "IÑAPARI",
+    "20609254778": "TECA"
+}
+
+anio = [2026, 2025, 2024, 2023, 2022, 2021]
+mes = [1, 12]
 
 
 def obtener_ventana(app_obj, timeout=20):
@@ -64,6 +143,55 @@ def iniciar_aplicacion():
         cmd_line=ruta_exe,
         work_dir=directorio_trabajo,
     )
+
+
+def cerrar_aplicacion(app):
+
+    try:
+
+        principal = app.window(
+            title_re=".*ContaNet ERP.*"
+        )
+
+        principal.close()
+
+        time.sleep(2)
+
+        for ctrl in principal.descendants():
+
+            try:
+
+                texto = ctrl.window_text().strip()
+
+                if texto == "Sí":
+
+                    print(
+                        "PULSANDO SI"
+                    )
+
+                    ctrl.click_input()
+
+                    time.sleep(3)
+
+                    return True
+
+            except:
+                pass
+
+        print(
+            "NO SE ENCONTRO BOTON SI"
+        )
+
+        return False
+
+    except Exception as e:
+
+        print(
+            "Error cerrando aplicación:",
+            e
+        )
+
+        return False
 
 
 def iniciar_sesion(ventana):
@@ -426,9 +554,18 @@ def hacer_click_relativo(ventana, rel_x, rel_y, doble=False):
     return True
 
 
-def seleccionar_empresa_y_anio(ventana_empresa):
-    nombre_empresa = "20376729126"
-    anio = "2026"
+def seleccionar_empresa_y_anio(
+    ventana_empresa,
+    ruc,
+    anio
+):
+    
+    print(
+            f"Seleccionando RUC={ruc} AÑO={anio}"
+        )
+
+    nombre_empresa = str(ruc)
+    anio = str(anio)
 
     try:
         busqueda = ventana_empresa.child_window(auto_id="txtBusqEmp", control_type="Edit")
@@ -603,7 +740,7 @@ def seleccionar_tesoreria_explorador(app):
         hacer_click_relativo(ventana_tesoreria, 0.08, 0.30, doble=True)
 
 
-def probar_fechas(app):
+def probar_fechas(app, anio_actual):
 
     principal = app.window(title_re=".*ContaNet ERP.*")
 
@@ -648,7 +785,7 @@ def probar_fechas(app):
 
         time.sleep(0.5)
 
-        send_keys("01/01/2026")
+        send_keys(f"01/01/{anio_actual}")
 
     time.sleep(1)
 
@@ -671,7 +808,7 @@ def probar_fechas(app):
 
         time.sleep(0.5)
 
-        send_keys("31/01/2026")
+        send_keys(f"31/12/{anio_actual}")
 
     time.sleep(1)
 
@@ -900,7 +1037,7 @@ def abrir_librito_cuenta_10(app):
     time.sleep(5)
 
 
-def completar_agregar_cuenta(app):
+def completar_agregar_cuenta(app, numero_operacion):
 
     principal = app.window(title_re=".*ContaNet ERP.*")
 
@@ -956,9 +1093,41 @@ def completar_agregar_cuenta(app):
     #
     if checkbox:
 
-        checkbox.click_input()
-
-        time.sleep(1)
+        try:
+        
+            estado = checkbox.get_toggle_state()
+    
+            print(
+                "ESTADO CHECK:",
+                estado
+            )
+    
+            if estado == 0:
+            
+                print(
+                    "MARCANDO CHECK"
+                )
+    
+                checkbox.click_input()
+    
+                time.sleep(1)
+    
+            else:
+            
+                print(
+                    "CHECK YA MARCADO"
+                )
+    
+        except Exception as e:
+        
+            print(
+                "NO SE PUDO LEER EL ESTADO:",
+                e
+            )
+    
+            checkbox.click_input()
+    
+            time.sleep(1)
 
     #
     # Escribir número movimiento
@@ -971,7 +1140,7 @@ def completar_agregar_cuenta(app):
 
         send_keys("^a")
         send_keys("{BACKSPACE}")
-        send_keys("1111111")
+        send_keys(str(numero_operacion))
 
         time.sleep(1)
 
@@ -1136,89 +1305,155 @@ def aceptar_mensaje_sistema(app):
 
 
 def seleccionar_fila_reg_ctb(app, indice):
-
     principal = app.window(title_re=".*ContaNet ERP.*")
-
     for ctrl in principal.descendants():
-
         try:
             texto = ctrl.window_text().strip()
             if texto == "Reg. Ctb.":
                 rect = ctrl.rectangle()
-
-                #
-                # primera fila ≈ +55
-                # cada fila ≈ +34
-                #
                 x = rect.left + rect.width() // 2
-                y = rect.bottom + 55 + (indice * 34)
+                y_top = rect.bottom + 55
 
-                print(
-                    f"SELECCIONANDO FILA {indice + 1}",
-                    x,
-                    y
-                ) 
-                mouse.click(coords=(x, y))
-                mouse.move(coords=(x, y))
-                print("CLICK REALIZADO EN:", x, y)
-                time.sleep(1)
-                mouse.double_click(coords=(x, y))
-                print("DOBLE CLICK REALIZADO EN:", x, y)
-                time.sleep(1)
+                try:
+                    principal.set_focus()
+                    time.sleep(0.5)
+                except:
+                    pass
+
+                # Calibración exacta basada en la pantalla del usuario
+                max_visible = 14
+                
+                if indice < max_visible:
+                    y = y_top + (indice * 34)
+                    print(f"SELECCIONANDO FILA {indice + 1} (Coordenada directa: {x}, {y})")
+                    mouse.click(coords=(x, y))
+                    mouse.move(coords=(x, y))
+                    time.sleep(1)
+                    mouse.double_click(coords=(x, y))
+                    time.sleep(1)
+                else:
+                    y_last_visible = y_top + ((max_visible - 1) * 34)
+                    y_prev_visible = y_last_visible - 34
+                    
+                    print(f"SELECCIONANDO FILA {indice + 1} (Robando foco y scrolleando desde fila {max_visible})")
+                    
+                    # 1. Click en la fila anterior visible para GARANTIZAR que la grilla recupere 
+                    # el foco del teclado, incluso si acabamos de cerrar un mensaje de error.
+                    mouse.click(coords=(x, y_prev_visible))
+                    time.sleep(0.5)
+                    
+                    # 2. Bajar 2 veces. 
+                    # 1er DOWN: vuelve a seleccionar la fila que procesamos en el ciclo anterior.
+                    # 2do DOWN: selecciona la NUEVA fila, forzando a la grilla a hacer scroll hacia abajo.
+                    send_keys("{DOWN}")
+                    time.sleep(0.3)
+                    send_keys("{DOWN}")
+                    time.sleep(0.5)
+                    
+                    # 3. Tras el scroll, la nueva fila queda exactamente en la posición y_last_visible
+                    mouse.click(coords=(x, y_last_visible))
+                    mouse.move(coords=(x, y_last_visible))
+                    time.sleep(1)
+                    mouse.double_click(coords=(x, y_last_visible))
+                    time.sleep(1)
+                
                 return True
-
         except:
             pass
-
     return False
 
-
-
 def seleccionar_siguiente_fila(app):
-
-    principal = app.window(title_re=".*ContaNet ERP.*")
-
-    for ctrl in principal.descendants():
-
-        try:
-
-            texto = ctrl.window_text().strip()
-
-            if texto == "Reg. Ctb.":
-
-                rect = ctrl.rectangle()
-
-                x = rect.left + rect.width() // 2
-
-                #
-                # CUARTA FILA
-                #
-                y = rect.bottom + 155
-
-                print("CLICK SIGUIENTE FILA:", x, y)
-
-                mouse.click(coords=(x, y))
-
-                time.sleep(1)
-
-                return
-
-        except:
-            pass
+    # Ya no es necesario porque seleccionar_fila_reg_ctb navega desde el inicio
+    pass
 
 
 
-def procesar_fila(app):
+def obtener_asiento_contable():
+    mouse.double_click(coords=(650, 171))
+
+    time.sleep(0.5)
+
+    send_keys("^a")
+    time.sleep(0.2)
+
+    send_keys("^c")
+    time.sleep(0.5)
+
+    try:
+        win32clipboard.OpenClipboard()
+        asiento = (
+                win32clipboard
+                .GetClipboardData()
+                .strip()
+            )
+        win32clipboard.CloseClipboard()
+
+        return asiento
+
+    except Exception:
+        return None
+    
+
+def buscar_numero_operacion(
+    hoja,
+    asiento,
+    anio
+):
+    try:
+
+        df = excel_data[hoja]
+
+        df["Asiento Contable"] = (
+            df["Asiento Contable"]
+            .astype(str)
+            .str.strip()
+        )
+
+        df["Año"] = (
+            pd.to_numeric(
+                df["Año"],
+                errors="coerce"
+            )
+        )
+
+        resultado = df[
+            (df["Asiento Contable"] == asiento)
+            &
+            (df["Año"] == int(anio))
+        ]
+
+        if resultado.empty:
+            return None
+
+        return str(
+            resultado.iloc[0][
+                "Número de Operación"
+            ]
+        )
+
+    except Exception as e:
+        print(e)
+
+        print(
+            f"Asiento {asiento} no encontrado para el año {anio}"
+        )
+
+        return None
+
+
+def procesar_fila(app, numero_operacion):
 
     seleccionar_registro_y_modificar(app)
     time.sleep(3)
 
-    
-    if existe_mensaje_no_modificable(app):
+    tipo_error = tipo_mensaje_error(app)
+    if tipo_error:
         cerrar_mensaje_no_modificable(app)
-        print("SE OMITE ESTA FILA")
 
-        return False
+        seleccionar_siguiente_fila(app)
+
+        print(f"SE OMITE ESTA FILA: {tipo_error}")
+        return tipo_error
 
 
     copiar_todo_asiento(app)
@@ -1230,7 +1465,7 @@ def procesar_fila(app):
     abrir_librito_cuenta_10(app)
     time.sleep(2)
 
-    completar_agregar_cuenta(app)
+    completar_agregar_cuenta(app, numero_operacion)
     time.sleep(2)
 
     limpiar_filtro_cuenta(app)
@@ -1245,6 +1480,34 @@ def procesar_fila(app):
     aceptar_mensaje_sistema(app)
     time.sleep(2)
     seleccionar_siguiente_fila(app)
+    return "EXITO"
+
+def tipo_mensaje_error(app):
+
+    principal = app.window(title_re=".*ContaNet ERP.*")
+
+    for ctrl in principal.descendants():
+        try:
+            texto_raw = ctrl.window_text()
+
+            if not texto_raw:
+                continue
+
+            texto = texto_raw.strip().lower()
+
+            if "no se puede modificar un voucher" in texto:
+                return "VOUCHER NO MODIFICABLE"
+
+            if "asignado a caja" in texto:
+                return "ASIGNADO A CAJA"
+
+            if "no puede culminar el proceso" in texto:
+                return "PERIODO CERRADO"
+
+        except:
+            pass
+
+    return None
 
 
 def existe_mensaje_no_modificable(app):
@@ -1283,67 +1546,266 @@ def cerrar_mensaje_no_modificable(app):
     return False
 
 
-def obtener_asiento_contable():
-    mouse.double_click(coords=(650, 171))
+def tiene_movimientos(app):
 
-    time.sleep(0.5)
+    principal = app.window(
+        title_re=".*ContaNet ERP.*"
+    )
 
-    send_keys("^a")
-    time.sleep(0.2)
+    for ctrl in principal.descendants():
+        try:
+            texto = ctrl.window_text().strip()
 
-    send_keys("^c")
-    time.sleep(0.5)
+            if "Resultado :" in texto:
+                print(
+                        "RESULTADO DETECTADO:",
+                        texto
+                    )
 
-    try:
-        win32clipboard.OpenClipboard()
-        texto = win32clipboard.GetClipboardData()
-        win32clipboard.CloseClipboard()
 
-        return texto.strip()
+                if "0 fila" in texto:
+                    return False
 
-    except Exception:
-        return None
+                return True
+
+        except:
+            pass
+
+    return True
+
+
+def procesar_empresa_anio(
+    ruc,
+    anio_actual
+):
+
+    app = iniciar_aplicacion()
+
+    ventana_login = obtener_ventana(app)
+
+    ventana_login = app.window(
+        title_re=".*Login.*"
+    )
+
+    iniciar_sesion(
+        ventana_login
+    )
+
+    time.sleep(2)
+
+    ventana_empresa = app.window(
+        title_re=".*Seleccionar Empresa.*"
+    )
+
+    seleccionar_empresa_y_anio(
+        ventana_empresa,
+        ruc,
+        anio_actual
+    )
+
+    time.sleep(2)
+
+    seleccionar_tesoreria_explorador(app)
+
+    time.sleep(5)
+
+    probar_fechas(
+        app,
+        anio_actual
+    )
+
+    time.sleep(5)
+
+    if not tiene_movimientos(app):
+
+        print(
+            f"SIN MOVIMIENTOS EN {anio_actual}"
+        )
+
+        cerrar_aplicacion(app)
+
+        return False
+
+    print(
+        f"MOVIMIENTOS EN {anio_actual}"
+    )
+
+    return True
+
+
+def tipo_mensaje_error(app):
+    principal = app.window(title_re=".*ContaNet ERP.*")
+
+    for ctrl in principal.descendants():
+        try:
+            texto_raw = ctrl.window_text()
+            if not texto_raw:
+                continue
+
+            texto = texto_raw.strip().lower()
+
+            if "no se puede modificar un voucher" in texto:
+                return "VOUCHER NO MODIFICABLE"
+
+            if "asignado a caja" in texto:
+                return "ASIGNADO A CAJA"
+
+            if "periodo" in texto and "cerrado" in texto:
+                return "PERIODO CERRADO"
+
+        except:
+            pass
+
+    return None
 
 
 def main():
-    app = iniciar_aplicacion()
-    ventana_login = obtener_ventana(app)
-    print("Ventana detectada:", ventana_login.window_text())
-    time.sleep(1)
+    anios = [2026, 2025, 2024, 2023, 2022, 2021]
 
-    ventana_login = app.window(title_re=".*Login.*")
-    iniciar_sesion(ventana_login)
+    for ruc, nombre_empresa in empresas.items():
+        # Validar que el nombre de la empresa coincida con el nombre de la pestaña de la página
+        hoja_excel = nombre_empresa
+        if hoja_excel not in excel_data:
+            print(f"RUC {ruc} ({nombre_empresa}) no tiene pestaña con su nombre en el Excel, se omite.")
+            continue
 
-    time.sleep(2)
+        print(f"\n{'='*60}")
+        print(f"EMPRESA: {nombre_empresa} (RUC: {ruc})")
+        print(f"{'='*60}")
 
-    try:
-        ventana_empresa = app.window(title_re=".*Seleccionar Empresa.*")
-    except Exception as exc:
-        print("No se encontró la ventana de selección de empresa aún:", exc)
-        return
+        for anio_actual in anios:
+            print(f"\n--- Procesando {nombre_empresa} | Año {anio_actual} ---")
 
-    seleccionar_empresa_y_anio(ventana_empresa)
-    time.sleep(2)
-    seleccionar_tesoreria_explorador(app)
-    time.sleep(5)
+            # Abrir la aplicación para cada empresa/año
+            app = iniciar_aplicacion()
 
-    probar_fechas(app)
-    time.sleep(5)
+            ventana_login = obtener_ventana(app)
+            print("Ventana detectada:", ventana_login.window_text())
+            time.sleep(1)
 
-    # Temporal inicio
-    send_keys("^c")
-    time.sleep(1)
-    
-    for fila in range(2, 8):
+            ventana_login = app.window(title_re=".*Login.*")
+            iniciar_sesion(ventana_login)
+            time.sleep(2)
 
-        print(f"PROCESANDO FILA {fila}")
-        seleccionar_fila_reg_ctb(app, fila)
-        time.sleep(2)
-        asiento = obtener_asiento_contable()
-        print(f"ASIENTO ENCONTRADO: {asiento}")
-        procesar_fila(app)
-        time.sleep(3)
+            try:
+                ventana_empresa_win = app.window(title_re=".*Seleccionar Empresa.*")
+            except Exception as exc:
+                print(f"No se encontró la ventana de selección de empresa: {exc}")
+                try:
+                    cerrar_aplicacion(app)
+                except Exception:
+                    pass
+                continue
 
+            seleccionar_empresa_y_anio(
+                ventana_empresa_win,
+                ruc,
+                anio_actual
+            )
+            time.sleep(2)
+
+            seleccionar_tesoreria_explorador(app)
+            time.sleep(5)
+
+            # Cargar fechas: 01/01/YYYY hasta 31/12/YYYY
+            probar_fechas(app, anio_actual)
+            time.sleep(5)
+
+            # Si no hay movimientos, cerrar y pasar al siguiente año
+            if not tiene_movimientos(app):
+                print(f"SIN MOVIMIENTOS para {nombre_empresa} en {anio_actual}, pasando al siguiente año.")
+                registrar_reporte(ruc, nombre_empresa, anio_actual, "N/A", "SIN MOVIMIENTOS", "No hay registros en este año")
+                cerrar_aplicacion(app)
+                time.sleep(3)
+                continue
+
+            print(f"MOVIMIENTOS ENCONTRADOS para {nombre_empresa} en {anio_actual}")
+
+            send_keys("^c")
+            time.sleep(1)
+
+            print(f"TRABAJANDO CON {nombre_empresa} AÑO {anio_actual}")
+
+            ultimo_asiento = None
+            repetidos = 0
+            fila = 0
+            while True:
+                print(f"PROCESANDO FILA {fila}")
+                if not seleccionar_fila_reg_ctb(app, fila):
+                    print(f"No se pudo seleccionar fila {fila}, terminando este año.")
+                    break
+
+                time.sleep(2)
+                asiento = obtener_asiento_contable()
+                print("ASIENTO:", asiento)
+
+                if asiento is None:
+                    print("No se pudo obtener asiento, terminando este año.")
+                    break
+                
+                if asiento == ultimo_asiento:
+                    repetidos += 1
+                    if repetidos >= 3:
+                        print("Se alcanzó el final de la lista (mismo asiento 3 veces consecutivas).")
+                        break
+                    else:
+                        print(f"Asiento repetido {repetidos} vez/veces, saltando para ver si la grilla avanza...")
+                else:
+                    repetidos = 0
+
+                ultimo_asiento = asiento
+
+                if es_asiento_procesado(ruc, anio_actual, asiento):
+                    print(f"ASIENTO {asiento} ya procesado anteriormente, saltando.")
+                    fila += 1
+                    continue
+
+                numero_operacion = buscar_numero_operacion(
+                    hoja_excel,
+                    asiento,
+                    anio_actual
+                )
+                print("NUMERO OPERACION:", numero_operacion)
+
+                if numero_operacion is None:
+                    print("NO ENCONTRADO EN EXCEL, saltando fila.")
+                    # Registrar progreso y reporte
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "No se encontró el número de operación en el Excel")
+                    registrar_asiento_procesado(ruc, anio_actual, asiento)
+                    fila += 1
+                    continue
+
+                resultado = procesar_fila(app, numero_operacion)
+
+                if resultado == "PERIODO CERRADO":
+                    registrar_reporte(
+                        ruc,
+                        nombre_empresa,
+                        anio_actual,
+                        asiento,
+                        "NO MODIFICADO",
+                        "Periodo cerrado"
+                    )
+                
+                if resultado == "VOUCHER NO MODIFICABLE":
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Voucher no modificable")
+                elif resultado == "ASIGNADO A CAJA":
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El asiento contable ha sido asignado a caja")
+                else:
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se completó la actualización")
+                    
+                registrar_asiento_procesado(ruc, anio_actual, asiento)
+                time.sleep(3)
+                fila += 1
+
+            # Cerrar la aplicación al terminar el año
+            print(f"Cerrando aplicación para {nombre_empresa} año {anio_actual}")
+            cerrar_aplicacion(app)
+            time.sleep(3)
+
+    print("\n" + "="*60)
+    print("PROCESO COMPLETADO PARA TODAS LAS EMPRESAS Y AÑOS")
+    print("="*60)
 
 
 def cargar_data_excel():
