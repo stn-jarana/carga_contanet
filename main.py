@@ -1,7 +1,8 @@
 from pywinauto import Application, mouse
 from pywinauto.keyboard import send_keys
-from pywinauto.uia_defines import IUIA
+import win32clipboard
 import time
+import pandas as pd
 
 
 ruta_exe = (
@@ -717,7 +718,10 @@ def seleccionar_registro_y_modificar(app):
 
 def copiar_todo_asiento(app):
 
-    principal = app.window(title_re=".*ContaNet ERP.*")
+    principal = app.window(
+        title_re=".*ContaNet ERP.*"
+    )
+
     boton_copiar_todo = None
 
     for ctrl in principal.descendants():
@@ -725,13 +729,25 @@ def copiar_todo_asiento(app):
         try:
 
             texto = ctrl.window_text().strip()
+
             if "Copiar" in texto and "Todo" in texto:
+
                 boton_copiar_todo = ctrl
+
                 print(
                     "BOTON COPIAR TODO:",
                     texto,
                     ctrl.rectangle()
                 )
+
+                print("\n===== PROPIEDADES =====")
+
+                try:
+                    print(ctrl.get_properties())
+                except Exception as e:
+                    print("ERROR:", e)
+
+                print("===== FIN PROPIEDADES =====\n")
 
                 break
 
@@ -741,12 +757,39 @@ def copiar_todo_asiento(app):
     if boton_copiar_todo:
 
         print("CLICK COPIAR TODO")
+
         boton_copiar_todo.click_input()
+
         time.sleep(5)
 
     else:
 
-        print("NO SE ENCONTRO EL BOTON COPIAR TODO")
+        print(
+            "NO SE ENCONTRO EL BOTON COPIAR TODO"
+        )
+
+def inspeccionar_ventana_actual(app):
+
+    principal = app.window(
+        title_re=".*ContaNet ERP.*"
+    )
+
+    print("\n========== CONTROLES ==========\n")
+
+    for ctrl in principal.descendants():
+
+        try:
+
+            print(
+                ctrl.friendly_class_name(),
+                "=>",
+                ctrl.window_text()
+            )
+
+        except:
+            pass
+
+    print("\n========== FIN CONTROLES ==========\n")
 
 
 def filtrar_cuenta_10(app):
@@ -1114,11 +1157,16 @@ def seleccionar_fila_reg_ctb(app, indice):
                     f"SELECCIONANDO FILA {indice + 1}",
                     x,
                     y
-                )
+                ) 
                 mouse.click(coords=(x, y))
+                mouse.move(coords=(x, y))
+                print("CLICK REALIZADO EN:", x, y)
                 time.sleep(1)
-
+                mouse.double_click(coords=(x, y))
+                print("DOBLE CLICK REALIZADO EN:", x, y)
+                time.sleep(1)
                 return True
+
         except:
             pass
 
@@ -1235,6 +1283,28 @@ def cerrar_mensaje_no_modificable(app):
     return False
 
 
+def obtener_asiento_contable():
+    mouse.double_click(coords=(650, 171))
+
+    time.sleep(0.5)
+
+    send_keys("^a")
+    time.sleep(0.2)
+
+    send_keys("^c")
+    time.sleep(0.5)
+
+    try:
+        win32clipboard.OpenClipboard()
+        texto = win32clipboard.GetClipboardData()
+        win32clipboard.CloseClipboard()
+
+        return texto.strip()
+
+    except Exception:
+        return None
+
+
 def main():
     app = iniciar_aplicacion()
     ventana_login = obtener_ventana(app)
@@ -1256,14 +1326,24 @@ def main():
     time.sleep(2)
     seleccionar_tesoreria_explorador(app)
     time.sleep(5)
+
     probar_fechas(app)
+    time.sleep(5)
+
+    # Temporal inicio
+    send_keys("^c")
+    time.sleep(1)
     
     for fila in range(2, 8):
+
         print(f"PROCESANDO FILA {fila}")
         seleccionar_fila_reg_ctb(app, fila)
-        time.sleep(3)
+        time.sleep(2)
+        asiento = obtener_asiento_contable()
+        print(f"ASIENTO ENCONTRADO: {asiento}")
         procesar_fila(app)
         time.sleep(3)
+
 
 
 def cargar_data_excel():
