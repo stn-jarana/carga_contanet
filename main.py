@@ -94,8 +94,8 @@ hojas_excel = {
 
 empresas = {
     "20376729126": "STN",
-    "20506883301": "CMT",
     "20504334041": "ITS",
+    "20506883301": "CMT",
     "20600692781": "DIONISO",
     "20514016624": "DYNAMITEX",
     "20606955724": "PERU COMMERCE",
@@ -1331,6 +1331,7 @@ def seleccionar_fila_reg_ctb(app, indice):
                     time.sleep(1)
                     mouse.double_click(coords=(x, y))
                     time.sleep(1)
+                    return y
                 else:
                     y_last_visible = y_top + ((max_visible - 1) * 34)
                     y_prev_visible = y_last_visible - 34
@@ -1356,11 +1357,11 @@ def seleccionar_fila_reg_ctb(app, indice):
                     time.sleep(1)
                     mouse.double_click(coords=(x, y_last_visible))
                     time.sleep(1)
+                    return y_last_visible
                 
-                return True
         except:
             pass
-    return False
+    return None
 
 def seleccionar_siguiente_fila(app):
     # Ya no es necesario porque seleccionar_fila_reg_ctb navega desde el inicio
@@ -1369,12 +1370,26 @@ def seleccionar_siguiente_fila(app):
 
 
 def obtener_asiento_contable():
+    # Clic para quitar foco de la grilla
+    mouse.click(coords=(650, 171))
+    time.sleep(0.3)
+    # Clic para enfocar el textbox
+    mouse.click(coords=(650, 171))
+    time.sleep(0.3)
+    # Doble clic para seleccionar el texto
     mouse.double_click(coords=(650, 171))
 
     time.sleep(0.5)
 
     send_keys("^a")
     time.sleep(0.2)
+
+    try:
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.CloseClipboard()
+    except Exception:
+        pass
 
     send_keys("^c")
     time.sleep(0.5)
@@ -1393,6 +1408,54 @@ def obtener_asiento_contable():
     except Exception:
         return None
     
+
+def obtener_cuenta_contable_grilla(app, y):
+    principal = app.window(title_re=".*ContaNet ERP.*")
+    x = None
+    for ctrl in principal.descendants():
+        try:
+            texto = ctrl.window_text().strip()
+            if texto == "Nro. Cta.":
+                rect = ctrl.rectangle()
+                x = rect.left + rect.width() // 2
+                break
+        except Exception:
+            pass
+
+    if x is None:
+        print("NO SE ENCONTRO LA COLUMNA Nro. Cta.")
+        return None
+
+    # Click en la celda de la columna "Nro. Cta." en la fila actual
+    mouse.click(coords=(x, y))
+    time.sleep(0.5)
+
+    send_keys("^c")
+    time.sleep(0.5)
+
+    try:
+        win32clipboard.OpenClipboard()
+        cuenta = win32clipboard.GetClipboardData().strip()
+        win32clipboard.EmptyClipboard() # Limpiar portapapeles para que no se filtre al asiento
+        win32clipboard.CloseClipboard()
+    except Exception:
+        cuenta = None
+
+    # Hacemos clic en la columna "Reg. Ctb." de esta misma fila para asegurar que salimos del modo edición de la celda
+    for ctrl in principal.descendants():
+        try:
+            texto = ctrl.window_text().strip()
+            if texto == "Reg. Ctb.":
+                rect = ctrl.rectangle()
+                x_reg = rect.left + rect.width() // 2
+                mouse.click(coords=(x_reg, y))
+                time.sleep(0.3)
+                break
+        except Exception:
+            pass
+
+    return cuenta
+
 
 def buscar_numero_operacion(
     hoja,
@@ -1727,33 +1790,75 @@ def main():
             print(f"TRABAJANDO CON {nombre_empresa} AÑO {anio_actual}")
 
             ultimo_asiento = None
+            ultima_cuenta = None
+            ultimo_asiento_procesado = None
             repetidos = 0
+            filas_estancadas = 0
             fila = 0
             while True:
-                print(f"PROCESANDO FILA {fila}")
-                if not seleccionar_fila_reg_ctb(app, fila):
+                y_coord = seleccionar_fila_reg_ctb(app, fila)
+                if not y_coord:
                     print(f"No se pudo seleccionar fila {fila}, terminando este año.")
                     break
 
                 time.sleep(2)
-                asiento = obtener_asiento_contable()
-                print("ASIENTO:", asiento)
 
-                if asiento is None:
-                    print("No se pudo obtener asiento, terminando este año.")
-                    break
+                cuenta_raw = obtener_cuenta_contable_grilla(app, y_coord)
                 
-                if asiento == ultimo_asiento:
+                # A veces ContaNet copia toda la fila en lugar de solo la celda. Extraer la cuenta.
+                cuenta = None
+                is_10_4 = False
+                if cuenta_raw:
+                    # Buscamos cualquier palabra que parezca una cuenta (ej: empieza con 10.)
+                    palabras = str(cuenta_raw).split()
+                    for p in palabras:
+                        if p.startswith("10."):
+                            cuenta = p
+                            if p.startswith("10.4."):
+                                is_10_4 = True
+                            break
+                    if not cuenta:
+                        cuenta = str(cuenta_raw)[:20] # fallback para logs
+
+                # Solo obtenemos el asiento si es 10.4, o si la cuenta se repite para detectar si la grilla se atascó
+                if is_10_4 or cuenta == ultima_cuenta:
+                    asiento = obtener_asiento_contable()
+                else:
+                    asiento = None
+
+                # Validar si estamos atascados al final de la grilla (mismos datos visuales exactos)
+                if cuenta == ultima_cuenta and asiento is not None and asiento == ultimo_asiento:
+                    filas_estancadas += 1
+                    if filas_estancadas >= 4:
+                        print("Se alcanzó el final de la grilla (la fila no avanza).")
+                        break
+                else:
+                    filas_estancadas = 0
+
+                ultima_cuenta = cuenta
+                if asiento is not None:
+                    ultimo_asiento = asiento
+
+                # 1) Validar que empiece con 10.4.
+                if not is_10_4:
+                    print(f"NO PROCESADO: La cuenta {cuenta} no empieza con 10.4.xxx")
+                    fila += 1
+                    continue
+                
+                print(f"EVALUANDO: Cuenta {cuenta} | Asiento {asiento}")
+                
+                # 2) Solo si empieza con 10.4, aplicamos la regla de cierre por asiento contable repetido
+                if asiento == ultimo_asiento_procesado:
                     repetidos += 1
-                    if repetidos >= 3:
-                        print("Se alcanzó el final de la lista (mismo asiento 3 veces consecutivas).")
+                    if repetidos >= 10:
+                        print("Se alcanzó el límite (mismo asiento 10 veces consecutivas para cuentas 10.4).")
                         break
                     else:
                         print(f"Asiento repetido {repetidos} vez/veces, saltando para ver si la grilla avanza...")
                 else:
                     repetidos = 0
-
-                ultimo_asiento = asiento
+                
+                ultimo_asiento_procesado = asiento
 
                 if es_asiento_procesado(ruc, anio_actual, asiento):
                     print(f"ASIENTO {asiento} ya procesado anteriormente, saltando.")
