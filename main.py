@@ -14,14 +14,14 @@ def inicializar_reporte():
     if not os.path.exists(ARCHIVO_REPORTE):
         with open(ARCHIVO_REPORTE, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["RUC", "Empresa", "Año", "Asiento", "Estado", "Observación"])
+            writer.writerow(["RUC", "Empresa", "Año", "Asiento", "Número de Operación", "Estado", "Observación"])
 
-def registrar_reporte(ruc, nombre_empresa, anio, asiento, estado, observacion=""):
+def registrar_reporte(ruc, nombre_empresa, anio, asiento, estado, observacion="", numero_operacion=""):
     inicializar_reporte()
     try:
         with open(ARCHIVO_REPORTE, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([ruc, nombre_empresa, anio, asiento, estado, observacion])
+            writer.writerow([ruc, nombre_empresa, anio, asiento, numero_operacion, estado, observacion])
     except Exception as e:
         print(f"Error registrando en el reporte: {e}")
 
@@ -51,16 +51,47 @@ def registrar_asiento_procesado(ruc, anio, asiento):
     
     anio_str = str(anio)
     if anio_str not in progreso[ruc]:
-        progreso[ruc][anio_str] = []
+        progreso[ruc][anio_str] = {"asientos": [], "ultima_fila": 0}
+    
+    # Migración: si el formato antiguo era una lista, convertirlo
+    if isinstance(progreso[ruc][anio_str], list):
+        progreso[ruc][anio_str] = {"asientos": progreso[ruc][anio_str], "ultima_fila": 0}
         
-    if asiento not in progreso[ruc][anio_str]:
-        progreso[ruc][anio_str].append(asiento)
+    if asiento not in progreso[ruc][anio_str]["asientos"]:
+        progreso[ruc][anio_str]["asientos"].append(asiento)
         guardar_progreso(progreso)
 
 def es_asiento_procesado(ruc, anio, asiento):
     progreso = cargar_progreso()
     anio_str = str(anio)
-    return ruc in progreso and anio_str in progreso[ruc] and asiento in progreso[ruc][anio_str]
+    if ruc in progreso and anio_str in progreso[ruc]:
+        dato = progreso[ruc][anio_str]
+        # Migración: formato antiguo era lista
+        if isinstance(dato, list):
+            return asiento in dato
+        return asiento in dato.get("asientos", [])
+    return False
+
+def guardar_ultima_fila(ruc, anio, fila):
+    progreso = cargar_progreso()
+    if ruc not in progreso:
+        progreso[ruc] = {}
+    anio_str = str(anio)
+    if anio_str not in progreso[ruc]:
+        progreso[ruc][anio_str] = {"asientos": [], "ultima_fila": 0}
+    if isinstance(progreso[ruc][anio_str], list):
+        progreso[ruc][anio_str] = {"asientos": progreso[ruc][anio_str], "ultima_fila": 0}
+    progreso[ruc][anio_str]["ultima_fila"] = fila
+    guardar_progreso(progreso)
+
+def obtener_ultima_fila(ruc, anio):
+    progreso = cargar_progreso()
+    anio_str = str(anio)
+    if ruc in progreso and anio_str in progreso[ruc]:
+        dato = progreso[ruc][anio_str]
+        if isinstance(dato, dict):
+            return dato.get("ultima_fila", 0)
+    return 0
 
 ruta_exe = (
     r"C:\Ejecutable ContaNet ERP 3.0.7.44 - SOUTHERN"
@@ -93,15 +124,14 @@ hojas_excel = {
 
 
 empresas = {
-    "20376729126": "STN",
+    "20490242407": "INFOSUR",
     "20504334041": "ITS",
+    "20376729126": "STN",
     "20506883301": "CMT",
     "20600692781": "DIONISO",
     "20514016624": "DYNAMITEX",
     "20606955724": "PERU COMMERCE",
-    "20603941340": "TEXTIL SOLUTIONS",
     "20494530865": "DINSURA",
-    "20490242407": "INFOSUR",
     "20542813238": "IÑAPARI",
     "20609254778": "TECA"
 }
@@ -870,30 +900,12 @@ def copiar_todo_asiento(app):
             if "Copiar" in texto and "Todo" in texto:
 
                 boton_copiar_todo = ctrl
-
-                print(
-                    "BOTON COPIAR TODO:",
-                    texto,
-                    ctrl.rectangle()
-                )
-
-                print("\n===== PROPIEDADES =====")
-
-                try:
-                    print(ctrl.get_properties())
-                except Exception as e:
-                    print("ERROR:", e)
-
-                print("===== FIN PROPIEDADES =====\n")
-
                 break
 
         except Exception:
             pass
 
     if boton_copiar_todo:
-
-        print("CLICK COPIAR TODO")
 
         boton_copiar_todo.click_input()
 
@@ -1333,25 +1345,31 @@ def seleccionar_fila_reg_ctb(app, indice):
                     time.sleep(1)
                     return y
                 else:
+                    y_first = y_top  # Primera fila visible
                     y_last_visible = y_top + ((max_visible - 1) * 34)
-                    y_prev_visible = y_last_visible - 34
                     
-                    print(f"SELECCIONANDO FILA {indice + 1} (Robando foco y scrolleando desde fila {max_visible})")
+                    print(f"SELECCIONANDO FILA {indice + 1} (Scrolleando desde el inicio, {indice - max_visible + 1} veces)")
                     
-                    # 1. Click en la fila anterior visible para GARANTIZAR que la grilla recupere 
-                    # el foco del teclado, incluso si acabamos de cerrar un mensaje de error.
-                    mouse.click(coords=(x, y_prev_visible))
+                    # 1. Hacer click en la primera fila para asegurar foco en la grilla
+                    mouse.click(coords=(x, y_first))
                     time.sleep(0.5)
                     
-                    # 2. Bajar 2 veces. 
-                    # 1er DOWN: vuelve a seleccionar la fila que procesamos en el ciclo anterior.
-                    # 2do DOWN: selecciona la NUEVA fila, forzando a la grilla a hacer scroll hacia abajo.
-                    send_keys("{DOWN}")
+                    # 2. Presionar Ctrl+Home para ir al inicio absoluto de la grilla
+                    send_keys("^{HOME}")
+                    time.sleep(0.5)
+                    
+                    # 3. Hacer click en la primera fila de nuevo para confirmar posición
+                    mouse.click(coords=(x, y_first))
                     time.sleep(0.3)
-                    send_keys("{DOWN}")
+                    
+                    # 4. Bajar con DOWN desde la primera fila hasta la fila destino
+                    for i in range(indice):
+                        send_keys("{DOWN}")
+                        time.sleep(0.1)
+                    
                     time.sleep(0.5)
                     
-                    # 3. Tras el scroll, la nueva fila queda exactamente en la posición y_last_visible
+                    # 5. La fila destino queda en la última posición visible tras el scroll
                     mouse.click(coords=(x, y_last_visible))
                     mouse.move(coords=(x, y_last_visible))
                     time.sleep(1)
@@ -1462,6 +1480,13 @@ def buscar_numero_operacion(
     asiento,
     anio
 ):
+    """Busca el número de operación en el Excel.
+    
+    Retorna una tupla (numero_operacion, error):
+    - (str, None) si se encontró y es un número válido
+    - (None, "NO_ENCONTRADO") si no se encontró el asiento en el Excel
+    - (None, "NO_ES_NUMERO") si el valor encontrado no es numérico
+    """
     try:
 
         df = excel_data[hoja]
@@ -1486,13 +1511,22 @@ def buscar_numero_operacion(
         ]
 
         if resultado.empty:
-            return None
+            return None, "NO_ENCONTRADO"
 
-        return str(
-            resultado.iloc[0][
-                "Número de Operación"
-            ]
-        )
+        valor_operacion = resultado.iloc[0]["Número de Operación"]
+        valor_str = str(valor_operacion).strip()
+
+        # Validar que el valor sea un número entero
+        try:
+            int(valor_str)
+        except (ValueError, TypeError):
+            print(
+                f"El número de operación '{valor_str}' para el asiento {asiento} "
+                f"no es un valor numérico válido."
+            )
+            return None, "NO_ES_NUMERO"
+
+        return valor_str, None
 
     except Exception as e:
         print(e)
@@ -1501,7 +1535,7 @@ def buscar_numero_operacion(
             f"Asiento {asiento} no encontrado para el año {anio}"
         )
 
-        return None
+        return None, "NO_ENCONTRADO"
 
 
 def procesar_fila(app, numero_operacion):
@@ -1777,7 +1811,7 @@ def main():
             # Si no hay movimientos, cerrar y pasar al siguiente año
             if not tiene_movimientos(app):
                 print(f"SIN MOVIMIENTOS para {nombre_empresa} en {anio_actual}, pasando al siguiente año.")
-                registrar_reporte(ruc, nombre_empresa, anio_actual, "N/A", "SIN MOVIMIENTOS", "No hay registros en este año")
+                registrar_reporte(ruc, nombre_empresa, anio_actual, "N/A", "SIN MOVIMIENTOS", "No hay registros en este año", numero_operacion="")
                 cerrar_aplicacion(app)
                 time.sleep(3)
                 continue
@@ -1794,7 +1828,9 @@ def main():
             ultimo_asiento_procesado = None
             repetidos = 0
             filas_estancadas = 0
-            fila = 0
+            fila = obtener_ultima_fila(ruc, anio_actual)
+            if fila > 0:
+                print(f"REANUDANDO DESDE FILA {fila + 1} (progreso guardado)")
             while True:
                 y_coord = seleccionar_fila_reg_ctb(app, fila)
                 if not y_coord:
@@ -1841,8 +1877,9 @@ def main():
 
                 # 1) Validar que empiece con 10.4.
                 if not is_10_4:
-                    print(f"NO PROCESADO: La cuenta {cuenta} no empieza con 10.4.xxx")
+                    print(f"FILA {fila + 1} NO PROCESADO: La cuenta {cuenta} no empieza con 10.4.xxx")
                     fila += 1
+                    guardar_ultima_fila(ruc, anio_actual, fila)
                     continue
                 
                 print(f"EVALUANDO: Cuenta {cuenta} | Asiento {asiento}")
@@ -1861,11 +1898,12 @@ def main():
                 ultimo_asiento_procesado = asiento
 
                 if es_asiento_procesado(ruc, anio_actual, asiento):
-                    print(f"ASIENTO {asiento} ya procesado anteriormente, saltando.")
+                    print(f"FILA {fila + 1} ASIENTO {asiento} ya procesado anteriormente, saltando.")
                     fila += 1
+                    guardar_ultima_fila(ruc, anio_actual, fila)
                     continue
 
-                numero_operacion = buscar_numero_operacion(
+                numero_operacion, error_operacion = buscar_numero_operacion(
                     hoja_excel,
                     asiento,
                     anio_actual
@@ -1873,11 +1911,16 @@ def main():
                 print("NUMERO OPERACION:", numero_operacion)
 
                 if numero_operacion is None:
-                    print("NO ENCONTRADO EN EXCEL, saltando fila.")
-                    # Registrar progreso y reporte
-                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "No se encontró el número de operación en el Excel")
+                    if error_operacion == "NO_ES_NUMERO":
+                        print(f"NÚMERO DE OPERACIÓN NO VÁLIDO (no es numérico) para asiento {asiento}, saltando fila.")
+                        registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El número de operación no es un valor numérico válido", numero_operacion="")
+                    else:
+                        print("NO ENCONTRADO EN EXCEL, saltando fila.")
+                        registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "No se encontró el número de operación en el Excel", numero_operacion="")
+                    # Registrar progreso y pasar a la siguiente fila
                     registrar_asiento_procesado(ruc, anio_actual, asiento)
                     fila += 1
+                    guardar_ultima_fila(ruc, anio_actual, fila)
                     continue
 
                 resultado = procesar_fila(app, numero_operacion)
@@ -1889,19 +1932,21 @@ def main():
                         anio_actual,
                         asiento,
                         "NO MODIFICADO",
-                        "Periodo cerrado"
+                        "Periodo cerrado",
+                        numero_operacion=numero_operacion
                     )
                 
                 if resultado == "VOUCHER NO MODIFICABLE":
-                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Voucher no modificable")
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Voucher no modificable", numero_operacion=numero_operacion)
                 elif resultado == "ASIGNADO A CAJA":
-                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El asiento contable ha sido asignado a caja")
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El asiento contable ha sido asignado a caja", numero_operacion=numero_operacion)
                 else:
-                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se completó la actualización")
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se completó la actualización", numero_operacion=numero_operacion)
                     
                 registrar_asiento_procesado(ruc, anio_actual, asiento)
                 time.sleep(3)
                 fila += 1
+                guardar_ultima_fila(ruc, anio_actual, fila)
 
             # Cerrar la aplicación al terminar el año
             print(f"Cerrando aplicación para {nombre_empresa} año {anio_actual}")
