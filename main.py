@@ -6,6 +6,7 @@ import pandas as pd
 import json
 import os
 import csv
+import subprocess
 import calendar
 
 from datetime import datetime
@@ -242,6 +243,15 @@ directorio_trabajo = (
     r"C:\Ejecutable ContaNet ERP 3.0.7.44 - SOUTHERN"
 )
 
+# ── Reinicio programado ────────────────────────────────────────────────────────
+# Define las 2 horas del día en que la app se reinicia sola (hora, minuto).
+# Cambia estos valores según necesites.
+HORAS_REINICIO_PROGRAMADO = [
+    (10, 0),   # 08:15 AM
+    (21, 0),   # 02:00 PM
+]
+# ──────────────────────────────────────────────────────────────────────────────
+
 EXCEL_FILE = r"\\192.168.30.36\Tesoreria\TESORERIA\CONSTANCIAS DE PAGO\constancias_de_pago.xlsx"
 
 excel_data = pd.read_excel(
@@ -283,7 +293,7 @@ FECHAS_INICIO = {
 # Configuración del mes inicial por RUC y año (ej: STN desde febrero 2026 en adelante)
 MESES_INICIO = {
     "20506883301": {  # STN
-        2026: 3       # En 2026 comenzar desde el mes 2 (febrero)
+        2026: 5       # En 2026 comenzar desde el mes 2 (febrero)
     }
 }
 
@@ -326,6 +336,24 @@ def iniciar_aplicacion():
     )
 
 
+def forzar_cierre_procesos(nombre_exe="ContaNet.Aplicacion.exe"):
+    """Mata por nombre todas las instancias del proceso para evitar
+    que instancias huérfanas impidan el reinicio de la aplicación."""
+    try:
+        resultado = subprocess.run(
+            ["taskkill", "/F", "/IM", nombre_exe],
+            capture_output=True,
+            text=True,
+        )
+        if resultado.returncode == 0:
+            print(f"Proceso '{nombre_exe}' terminado forzosamente.")
+        else:
+            # returncode 128 = proceso no encontrado (ya cerrado)
+            print(f"No se encontraron instancias de '{nombre_exe}' (puede que ya estuviera cerrado).")
+    except Exception as e:
+        print(f"Error al intentar forzar cierre de '{nombre_exe}': {e}")
+
+
 def cerrar_aplicacion(app):
 
     try:
@@ -354,16 +382,15 @@ def cerrar_aplicacion(app):
 
                     time.sleep(3)
 
-                    return True
+                    break
 
             except:
                 pass
 
-        print(
-            "NO SE ENCONTRO BOTON SI"
-        )
-
-        return False
+        else:
+            print(
+                "NO SE ENCONTRO BOTON SI"
+            )
 
     except Exception as e:
 
@@ -372,7 +399,62 @@ def cerrar_aplicacion(app):
             e
         )
 
-        return False
+    finally:
+        # Siempre asegurarse de que no quede ninguna instancia abierta
+        time.sleep(1)
+        forzar_cierre_procesos()
+        time.sleep(2)
+    return True
+
+
+# ── Helpers de reinicio programado ────────────────────────────────────────────
+_horas_ya_reiniciadas: set = set()
+
+
+def debe_reiniciar_por_horario() -> bool:
+    """Devuelve True si la hora actual coincide (±1 min) con alguna de
+    las horas programadas en HORAS_REINICIO_PROGRAMADO y todavía no se
+    ha disparado el reinicio para esa hora en este día."""
+    ahora = datetime.now()
+    clave_dia = ahora.date()
+
+    for hora, minuto in HORAS_REINICIO_PROGRAMADO:
+        clave = (clave_dia, hora, minuto)
+        if clave in _horas_ya_reiniciadas:
+            continue  # ya se reinició en esta hora hoy
+        diff = abs((ahora.hour * 60 + ahora.minute) - (hora * 60 + minuto))
+        if diff <= 1:  # ventana de ±1 minuto
+            _horas_ya_reiniciadas.add(clave)
+            return True
+    return False
+
+
+def reiniciar_app_programado(app, ruc, anio_actual, mes_actual, dia_desde):
+    """Cierra la instancia actual y vuelve a iniciarla en el mismo punto.
+    Retorna el nuevo objeto `app` listo para continuar."""
+    hora_str = datetime.now().strftime("%H:%M")
+    print(f"[REINICIO PROGRAMADO {hora_str}] Cerrando instancia actual...")
+    cerrar_aplicacion(app)
+    time.sleep(3)
+
+    print(f"[REINICIO PROGRAMADO {hora_str}] Iniciando nueva instancia...")
+    app = iniciar_aplicacion()
+    ventana_login = obtener_ventana(app)
+    ventana_login = app.window(title_re=".*Login.*")
+    iniciar_sesion(ventana_login)
+    time.sleep(2)
+    ventana_empresa_win = app.window(title_re=".*Seleccionar Empresa.*")
+    seleccionar_empresa_y_anio(ventana_empresa_win, ruc, anio_actual)
+    time.sleep(2)
+    seleccionar_tesoreria_explorador(app)
+    time.sleep(5)
+    probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
+    time.sleep(7)
+    send_keys("^c")
+    time.sleep(1)
+    print(f"[REINICIO PROGRAMADO {hora_str}] Nueva instancia lista.")
+    return app
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def iniciar_sesion(ventana):
@@ -1271,24 +1353,13 @@ def completar_agregar_cuenta(app, numero_operacion):
                 print(
                     "MARCANDO CHECK"
                 )
-    
                 checkbox.click_input()
-    
                 time.sleep(1)
-    
             else:
-            
-                print(
-                    "CHECK YA MARCADO"
-                )
+                print("CHECK YA MARCADO")
     
         except Exception as e:
-        
-            print(
-                "NO SE PUDO LEER EL ESTADO:",
-                e
-            )
-    
+            print("NO SE PUDO LEER EL ESTADO:", e)
             checkbox.click_input()
     
             time.sleep(1)
@@ -2111,6 +2182,13 @@ def main():
                 if fila > 0:
                     print(f"REANUDANDO DESDE FILA {fila + 1} (progreso guardado)")
                 while True:
+                    # ── Reinicio programado ──────────────────────────────────
+                    if debe_reiniciar_por_horario():
+                        app = reiniciar_app_programado(
+                            app, ruc, anio_actual, mes_actual, dia_desde
+                        )
+                    # ────────────────────────────────────────────────────────
+
                     y_coord = seleccionar_fila_reg_ctb(app, fila)
                     if not y_coord:
                         print(f"No se pudo seleccionar fila {fila}, terminando este mes.")
@@ -2265,5 +2343,31 @@ def ingresar_datos():
 
 
 if __name__ == "__main__":
-    main()
+    ESPERA_ENTRE_REINICIOS = 30  # segundos a esperar antes de reintentar tras un fallo
 
+    intento = 0
+    while True:
+        intento += 1
+        print(f"\n{'='*60}")
+        print(f"[WATCHDOG] Iniciando ejecución (intento #{intento})")
+        print(f"[WATCHDOG] Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*60}\n")
+
+        try:
+            main()
+            # Si main() terminó sin excepción, el proceso está completo
+            print("[WATCHDOG] main() finalizó correctamente. Cerrando watchdog.")
+            break
+
+        except KeyboardInterrupt:
+            print("\n[WATCHDOG] Interrupción manual (Ctrl+C). Cerrando.")
+            forzar_cierre_procesos()
+            break
+
+        except Exception as e:
+            print(f"\n[WATCHDOG] ERROR INESPERADO en intento #{intento}: {e}")
+            print(f"[WATCHDOG] Limpiando procesos huérfanos...")
+            forzar_cierre_procesos()
+            print(f"[WATCHDOG] Reintentando en {ESPERA_ENTRE_REINICIOS} segundos...")
+            print(f"[WATCHDOG] (El progreso guardado en progreso.json se respetará)")
+            time.sleep(ESPERA_ENTRE_REINICIOS)
