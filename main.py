@@ -8,9 +8,12 @@ import os
 import csv
 import subprocess
 import calendar
+import dotenv
 
 from datetime import datetime
 import sys
+
+dotenv.load_dotenv()  # Cargar variables de entorno desde .env
 
 # Redireccionar stdout y stderr a consola y a archivo .txt de logs
 class LoggerTee:
@@ -499,8 +502,10 @@ def reiniciar_app_programado(app, ruc, anio_actual, mes_actual, dia_desde):
 
 
 def iniciar_sesion(ventana):
-    ventana.child_window(auto_id="txtUsuario", control_type="Edit").set_text("RPASISTEM2")
-    ventana.child_window(auto_id="txtContrasena", control_type="Edit").set_text("1234")
+    user = os.getenv('user')
+    password = os.getenv('password')
+    ventana.child_window(auto_id="txtUsuario", control_type="Edit").set_text(user)
+    ventana.child_window(auto_id="txtContrasena", control_type="Edit").set_text(password)
 
     boton = ventana.child_window(auto_id="bAceptar", control_type="Button")
     boton.click_input()
@@ -611,17 +616,8 @@ def buscar_y_click_texto(ventana, texto, doble=False):
 def encontrar_treeview(ventana):
 
     trees = ventana.descendants(control_type="Tree")
-
-    print(f"Trees encontrados: {len(trees)}")
-
     for t in trees:
         try:
-            print(
-                "TREE:",
-                t.element_info.name,
-                t.element_info.automation_id,
-                t.rectangle()
-            )
             return t
         except:
             pass
@@ -676,9 +672,6 @@ def seleccionar_nodo_arbol(ventana, texto_objetivo=None, indice=0, doble=False):
         except Exception:
             continue
 
-    # Mostrar los textos detectados para depuración
-    print("Candidatos detectados en árbol:", [t for t, _ in candidates])
-
     objetivo = texto_objetivo.lower() if texto_objetivo else None
 
     # Primero intentar coincidencia por texto completo/parcial
@@ -697,7 +690,6 @@ def seleccionar_nodo_arbol(ventana, texto_objetivo=None, indice=0, doble=False):
                     else:
                         rect = ctrl.rectangle()
                         hacer_click_en_coordenadas(rect.left + rect.width()//2, rect.top + rect.height()//2, espera=0.15)
-                    print(f"Elemento seleccionado por texto: {texto_ctrl}")
                     return True
                 except Exception:
                     try:
@@ -791,12 +783,6 @@ def click_tree_row_by_index(tree, row_index, doble=False):
             target = items[row_index][2]
             x = rect.left + rect.width() // 2
             y = rect.top + rect.height() // 2
-            # Seleccionando fila por índice visible
-            
-            print("Nombre:", target.window_text())
-            print("Element name:", target.element_info.name)
-            print("AutomationId:", target.element_info.automation_id)
-            print("Rect:", target.rectangle())
 
             try:
                 target.set_focus()
@@ -848,7 +834,6 @@ def hacer_click_relativo(ventana, rel_x, rel_y, doble=False):
     rect = ventana.rectangle()
     x = rect.left + int(rect.width() * rel_x)
     y = rect.top + int(rect.height() * rel_y)
-    print(f"Fallback: clic relativo en ({x}, {y})")
     if doble:
         mouse.move(coords=(x, y))
         time.sleep(0.2)
@@ -921,7 +906,6 @@ def seleccionar_empresa_y_anio(
                 hacer_click_relativo(ventana_empresa, 0.06, 0.18)
                 hacer_click_relativo(ventana_empresa, 0.06, 0.27)
                 hacer_click_relativo(ventana_empresa, 0.06, 0.36)
-                print("Clic por coordenadas intentado en posiciones de boton.")
             except Exception as exc:
                 print(f"No se pudo hacer clic por coordenadas: {exc}")
 
@@ -935,7 +919,6 @@ def seleccionar_tesoreria_explorador(app):
     if buscar_y_click_texto(ventana_principal, "TESORERIA"):
         print("Click en TESORERIA realizado.")
     else:
-        print("No se encontró TESORERIA en la ventana principal; intento por coordenadas.")
         hacer_click_relativo(ventana_principal, 0.06, 0.66)
         time.sleep(1)
         hacer_click_relativo(ventana_principal, 0.06, 0.76)
@@ -951,7 +934,6 @@ def seleccionar_tesoreria_explorador(app):
     # Arbol de tesorería: intentar seleccionar "Explorador" por posición fija (índice 4) como primer intento
     tree = encontrar_treeview(ventana_tesoreria)
     if tree is not None:
-        print("Intentando seleccionar por posición fija: quinta fila (índice 4).")
         if click_tree_row_by_index(tree, 4, doble=False):
             return
         print("No se pudo seleccionar por posición fija; intentando selección por texto como fallback.")
@@ -998,7 +980,6 @@ def seleccionar_tesoreria_explorador(app):
                 if pd is not None:
                     try:
                         pd.click_input()
-                        print("Scroll: página abajo pulsada.")
                     except Exception:
                         try:
                             pd.click()
@@ -1113,9 +1094,6 @@ def probar_fechas(app, anio_actual, mes_actual, dia_desde=1):
 
     # ACTUALIZAR
     if btn_actualizar:
-
-        print("CLICK ACTUALIZAR")
-
         btn_actualizar.click_input()
 
 
@@ -1172,9 +1150,7 @@ def copiar_todo_asiento(app):
             pass
 
     if boton_copiar_todo:
-
         boton_copiar_todo.click_input()
-
         time.sleep(5)
 
     else:
@@ -1223,27 +1199,15 @@ def filtrar_cuenta_10(app):
             # NOS QUEDAMOS CON EL FILTRO DE LA GRILLA INFERIOR
             #
             if texto == "N° Cuenta fila del filtro":
-
                 rect = ctrl.rectangle()
-
                 if rect.top > 600:
-
                     filtro = ctrl
-
-                    print(
-                        "FILTRO INFERIOR:",
-                        rect
-                    )
-
                     break
 
         except Exception:
             pass
 
     if filtro is None:
-
-        print("NO SE ENCONTRO FILTRO INFERIOR")
-
         return
 
     rect = filtro.rectangle()
@@ -1282,11 +1246,7 @@ def abrir_librito_cuenta_10(app):
                 # SOLO LA GRILLA INFERIOR
                 #
                 if rect.top > 650:
-
                     fila = ctrl
-
-                    print("FILA INFERIOR:", rect)
-
                     break
 
         except Exception:
@@ -1305,11 +1265,7 @@ def abrir_librito_cuenta_10(app):
     #
     x = rect.left - 25
     y = rect.top + rect.height() // 2
-
-    print("CLICK LIBRITO:", x, y)
-
     mouse.double_click(coords=(x, y))
-
     time.sleep(5)
 
 
