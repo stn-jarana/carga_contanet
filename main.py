@@ -34,28 +34,37 @@ ARCHIVO_PROGRESO = "progreso.json"
 ARCHIVO_REPORTE = "reporte_asientos.csv"
 ARCHIVO_METRICAS = "reporte_metricas.csv"
 
-# Globales de Métricas
+# Globales de Métricas por Día
 TIEMPO_INICIO_GLOBAL = datetime.now()
-METRICAS = {
-    "operaciones_evaluadas": 0,
-    "actualizados_exito": 0,
-    "no_modificados": 0,
-    "voucher_no_modificable": 0,
-    "asignado_a_caja": 0,
-    "periodo_cerrado": 0,
-    "no_encontrado_excel": 0,
-    "sin_movimientos_mes": 0,
-    "errores_otros": 0
-}
+METRICAS_DIARIAS = {}
+
+def _obtener_fecha_hoy():
+    return datetime.now().strftime("%Y-%m-%d")
+
+def _obtener_metricas_dia(fecha=None):
+    if fecha is None:
+        fecha = _obtener_fecha_hoy()
+    if fecha not in METRICAS_DIARIAS:
+        METRICAS_DIARIAS[fecha] = {
+            "operaciones_evaluadas": 0,
+            "actualizados_exito": 0,
+            "no_modificados": 0,
+            "voucher_no_modificable": 0,
+            "asignado_a_caja": 0,
+            "periodo_cerrado": 0,
+            "no_encontrado_excel": 0,
+            "sin_movimientos_mes": 0,
+            "errores_otros": 0
+        }
+    return METRICAS_DIARIAS[fecha]
 
 def inicializar_metricas():
     if not os.path.exists(ARCHIVO_METRICAS):
         with open(ARCHIVO_METRICAS, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
-                "Fecha_Hora_Reporte",
-                "Tiempo_Transcurrido",
-                "Total_Operaciones_Evaluadas",
+                "Fecha",
+                "Total_Asientos_Evaluados",
                 "Actualizados_Exito",
                 "No_Modificados_Total",
                 "Voucher_No_Modificable",
@@ -63,46 +72,77 @@ def inicializar_metricas():
                 "Periodo_Cerrado",
                 "No_Encontrado_Excel",
                 "Sin_Movimientos_Mes",
-                "Velocidad_Ops_Por_Hora",
                 "Porcentaje_Efectividad"
             ])
 
 def generar_reporte_metricas():
+    """Consolida y actualiza en reporte_metricas.csv las métricas agrupadas por DÍA."""
     inicializar_metricas()
-    ahora = datetime.now()
-    tiempo_transcurrido = ahora - TIEMPO_INICIO_GLOBAL
-    horas = tiempo_transcurrido.total_seconds() / 3600.0
-    minutos = int(tiempo_transcurrido.total_seconds() // 60)
-    segundos = int(tiempo_transcurrido.total_seconds() % 60)
-    tiempo_str = f"{int(horas):02d}h {minutos%60:02d}m {segundos:02d}s"
-
-    total_ops = METRICAS["operaciones_evaluadas"]
-    exito = METRICAS["actualizados_exito"]
-    no_mod = METRICAS["no_modificados"]
     
-    ops_por_hora = round(total_ops / horas, 2) if horas > 0 else 0
-    efectividad = round((exito / total_ops) * 100, 2) if total_ops > 0 else 0.0
+    # Cargar métricas existentes en el CSV para actualizar por fecha
+    registros_diarios = {}
+    if os.path.exists(ARCHIVO_METRICAS):
+        try:
+            with open(ARCHIVO_METRICAS, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    fecha_row = row.get("Fecha") or (row.get("Fecha_Hora_Reporte", "").split(" ")[0])
+                    if fecha_row:
+                        registros_diarios[fecha_row] = row
+        except Exception:
+            pass
 
+    # Actualizar / insertar datos desde METRICAS_DIARIAS
+    for fecha, m in METRICAS_DIARIAS.items():
+        total_ops = m["operaciones_evaluadas"]
+        exito = m["actualizados_exito"]
+        no_mod = m["no_modificados"]
+        efectividad = round((exito / total_ops) * 100, 2) if total_ops > 0 else 0.0
+        
+        # Si ya había un registro en CSV para este día y no hemos inicializado desde él en esta sesión,
+        # nos aseguramos de que el registro refleje la información diaria acumulada.
+        registros_diarios[fecha] = {
+            "Fecha": fecha,
+            "Total_Asientos_Evaluados": str(total_ops),
+            "Actualizados_Exito": str(exito),
+            "No_Modificados_Total": str(no_mod),
+            "Voucher_No_Modificable": str(m["voucher_no_modificable"]),
+            "Asignado_A_Caja": str(m["asignado_a_caja"]),
+            "Periodo_Cerrado": str(m["periodo_cerrado"]),
+            "No_Encontrado_Excel": str(m["no_encontrado_excel"]),
+            "Sin_Movimientos_Mes": str(m["sin_movimientos_mes"]),
+            "Porcentaje_Efectividad": f"{efectividad}%"
+        }
+
+    # Escribir el archivo CSV manteniendo 1 sola fila por día
+    fieldnames = [
+        "Fecha",
+        "Total_Asientos_Evaluados",
+        "Actualizados_Exito",
+        "No_Modificados_Total",
+        "Voucher_No_Modificable",
+        "Asignado_A_Caja",
+        "Periodo_Cerrado",
+        "No_Encontrado_Excel",
+        "Sin_Movimientos_Mes",
+        "Porcentaje_Efectividad"
+    ]
     try:
-        with open(ARCHIVO_METRICAS, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                ahora.strftime("%Y-%m-%d %H:%M:%S"),
-                tiempo_str,
-                total_ops,
-                exito,
-                no_mod,
-                METRICAS["voucher_no_modificable"],
-                METRICAS["asignado_a_caja"],
-                METRICAS["periodo_cerrado"],
-                METRICAS["no_encontrado_excel"],
-                METRICAS["sin_movimientos_mes"],
-                ops_por_hora,
-                f"{efectividad}%"
-            ])
-        print(f"\n[MÉTRICAS REPORTADAS] Tiempo: {tiempo_str} | Total: {total_ops} ops | Éxito: {exito} | Velocidad: {ops_por_hora} ops/hora | Efectividad: {efectividad}%\n")
+        with open(ARCHIVO_METRICAS, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for fecha_key in sorted(registros_diarios.keys()):
+                writer.writerow(registros_diarios[fecha_key])
+        
+        fecha_hoy = _obtener_fecha_hoy()
+        if fecha_hoy in METRICAS_DIARIAS:
+            m_hoy = METRICAS_DIARIAS[fecha_hoy]
+            tot = m_hoy["operaciones_evaluadas"]
+            ex = m_hoy["actualizados_exito"]
+            ef = round((ex / tot) * 100, 2) if tot > 0 else 0.0
+            print(f"[MÉTRICAS DIARIAS ACTUALIZADAS] Fecha: {fecha_hoy} | Total Día: {tot} ops | Éxito: {ex} | Efectividad: {ef}%\n")
     except Exception as e:
-        print(f"Error escribiendo reporte de métricas: {e}")
+        print(f"Error escribiendo reporte de métricas por día: {e}")
 
 def inicializar_reporte():
     if not os.path.exists(ARCHIVO_REPORTE):
@@ -117,27 +157,29 @@ def registrar_reporte(ruc, nombre_empresa, anio, asiento, estado, observacion=""
             writer = csv.writer(f)
             writer.writerow([ruc, nombre_empresa, anio, asiento, numero_operacion, estado, observacion])
         
-        # Actualización de Métricas
-        METRICAS["operaciones_evaluadas"] += 1
+        # Actualización de Métricas Diarias
+        m = _obtener_metricas_dia()
+        m["operaciones_evaluadas"] += 1
         if estado == "ACTUALIZADO":
-            METRICAS["actualizados_exito"] += 1
+            m["actualizados_exito"] += 1
         else:
-            METRICAS["no_modificados"] += 1
+            m["no_modificados"] += 1
             if observacion == "Voucher no modificable":
-                METRICAS["voucher_no_modificable"] += 1
+                m["voucher_no_modificable"] += 1
             elif "asignado a caja" in observacion.lower():
-                METRICAS["asignado_a_caja"] += 1
+                m["asignado_a_caja"] += 1
             elif "periodo cerrado" in observacion.lower():
-                METRICAS["periodo_cerrado"] += 1
+                m["periodo_cerrado"] += 1
             elif "no se encontró" in observacion.lower():
-                METRICAS["no_encontrado_excel"] += 1
+                m["no_encontrado_excel"] += 1
             elif "no hay registros" in observacion.lower():
-                METRICAS["sin_movimientos_mes"] += 1
+                m["sin_movimientos_mes"] += 1
             else:
-                METRICAS["errores_otros"] += 1
+                m["errores_otros"] += 1
 
-        # Generar fila de métricas periódica en reporte_metricas.csv
-        generar_reporte_metricas()
+        # Actualizar reporte de métricas por día periódicamente (cada 5 operaciones)
+        if m["operaciones_evaluadas"] % 5 == 0:
+            generar_reporte_metricas()
 
     except Exception as e:
         print(f"Error registrando en el reporte: {e}")
@@ -245,10 +287,9 @@ directorio_trabajo = (
 
 # ── Reinicio programado ────────────────────────────────────────────────────────
 # Define las 2 horas del día en que la app se reinicia sola (hora, minuto).
-# Cambia estos valores según necesites.
 HORAS_REINICIO_PROGRAMADO = [
-    (10, 0),   # 08:15 AM
-    (21, 0),   # 02:00 PM
+    (1, 0),   # 1:0 AM
+    (23, 0),   # 11:00 PM
 ]
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -865,11 +906,9 @@ def seleccionar_empresa_y_anio(
                 boton_seleccionar.set_focus()
                 time.sleep(0.5)
                 boton_seleccionar.click()
-                print("Botón Seleccionar presionado con click().")
             except Exception:
                 try:
                     boton_seleccionar.click_input()
-                    print("Botón Seleccionar presionado con click_input().")
                 except Exception:
                     try:
                         boton_seleccionar.invoke()
@@ -891,8 +930,6 @@ def seleccionar_empresa_y_anio(
 
 def seleccionar_tesoreria_explorador(app):
     ventana_principal = app.window(title_re=".*ContaNet ERP.*")
-    print("Ventana principal detectada:", ventana_principal.window_text())
-    print("Rect principal:", ventana_principal.rectangle())
     time.sleep(1)
 
     if buscar_y_click_texto(ventana_principal, "TESORERIA"):
@@ -965,7 +1002,6 @@ def seleccionar_tesoreria_explorador(app):
                     except Exception:
                         try:
                             pd.click()
-                            print("Scroll: página abajo pulsada (click()).")
                         except Exception:
                             print("No se pudo hacer click en Página Abajo del scrollbar.")
                 else:
@@ -974,7 +1010,6 @@ def seleccionar_tesoreria_explorador(app):
                         rect = tree.rectangle()
                         hacer_click_en_coordenadas(rect.left + rect.width()//2, rect.top + rect.height()//2)
                         mouse.scroll(coords=(rect.left + rect.width()//2, rect.top + rect.height()//2), wheel_dist=-3)
-                        print("Scroll: rueda enviada al Tree.")
                     except Exception:
                         print("No se pudo desplazar el Tree con la rueda.")
             else:
@@ -1105,9 +1140,6 @@ def seleccionar_registro_y_modificar(app):
             pass
 
     if btn_modificar:
-
-        print("CLICK MODIFICAR ASIENTO")
-
         btn_modificar.click_input()
 
         time.sleep(5)
@@ -1219,8 +1251,6 @@ def filtrar_cuenta_10(app):
     x = rect.left + 40
     y = rect.top + rect.height() // 2
 
-    print("CLICK FILTRO:", x, y)
-
     mouse.click(coords=(x, y))
 
     time.sleep(1)
@@ -1330,10 +1360,6 @@ def completar_agregar_cuenta(app, numero_operacion):
         except Exception:
             pass
 
-    print("CHECK:", checkbox)
-    print("EDIT:", edit_operacion)
-    print("ACEPTAR:", boton_aceptar)
-
     #
     # Marcar Tipo Operación
     #
@@ -1342,21 +1368,9 @@ def completar_agregar_cuenta(app, numero_operacion):
         try:
         
             estado = checkbox.get_toggle_state()
-    
-            print(
-                "ESTADO CHECK:",
-                estado
-            )
-    
             if estado == 0:
-            
-                print(
-                    "MARCANDO CHECK"
-                )
                 checkbox.click_input()
                 time.sleep(1)
-            else:
-                print("CHECK YA MARCADO")
     
         except Exception as e:
             print("NO SE PUDO LEER EL ESTADO:", e)
@@ -1385,9 +1399,6 @@ def completar_agregar_cuenta(app, numero_operacion):
     if boton_aceptar:
 
         boton_aceptar.click_input()
-
-        print("ACEPTAR PRESIONADO")
-
         time.sleep(3)
 
         # Verificar mensaje de error de cliente
@@ -1443,40 +1454,23 @@ def completar_agregar_cuenta(app, numero_operacion):
 def guardar_asiento(app):
 
     principal = app.window(title_re=".*ContaNet ERP.*")
-
     boton_guardar = None
-
     for ctrl in principal.descendants():
 
         try:
 
             texto = ctrl.window_text().strip()
-
             if texto == "Guardar":
-
                 boton_guardar = ctrl
-
-                print(
-                    "BOTON GUARDAR:",
-                    ctrl.rectangle()
-                )
-
                 break
 
         except Exception:
             pass
 
     if boton_guardar:
-
-        print("CLICK GUARDAR")
-
         boton_guardar.click_input()
 
         time.sleep(5)
-
-    else:
-
-        print("NO SE ENCONTRO BOTON GUARDAR")
 
 
 def limpiar_filtro_cuenta(app):
@@ -1506,24 +1500,17 @@ def limpiar_filtro_cuenta(app):
                     x = rect.left + 40
                     y = rect.top + rect.height() // 2
 
-                    print("LIMPIANDO FILTRO:", x, y)
-
                     mouse.click(coords=(x, y))
-
                     time.sleep(1)
 
                     send_keys("^a")
                     send_keys("{BACKSPACE}")
-
                     time.sleep(2)
 
                     return
 
         except Exception:
             pass
-
-    print("NO SE ENCONTRO FILTRO INFERIOR")
-
 
 def copiar_todo_nuevamente(app):
 
@@ -1536,16 +1523,7 @@ def copiar_todo_nuevamente(app):
             texto = ctrl.window_text().strip()
 
             if "Copiar" in texto and "Todo" in texto:
-
-                print(
-                    "BOTON COPIAR TODO:",
-                    ctrl.rectangle()
-                )
-
                 ctrl.click_input()
-
-                print("CLICK COPIAR TODO NUEVAMENTE")
-
                 time.sleep(5)
 
                 return
@@ -1576,10 +1554,6 @@ def aceptar_mensaje_sistema(app):
                 #
                 if rect.top > 450 and rect.top < 700:
                     boton_aceptar = ctrl
-                    print(
-                        "ACEPTAR MENSAJE:",
-                        rect
-                    )
                     break
 
         except Exception:
@@ -1620,7 +1594,6 @@ def seleccionar_fila_reg_ctb(app, indice):
                 
                 if indice < max_visible:
                     y = y_top + (indice * 34)
-                    print(f"SELECCIONANDO FILA {indice + 1} (Coordenada directa: {x}, {y})")
                     mouse.click(coords=(x, y))
                     mouse.move(coords=(x, y))
                     time.sleep(1)
@@ -1630,9 +1603,7 @@ def seleccionar_fila_reg_ctb(app, indice):
                 else:
                     y_first = y_top  # Primera fila visible
                     y_last_visible = y_top + ((max_visible - 1) * 34)
-                    
-                    print(f"SELECCIONANDO FILA {indice + 1} (Scrolleando desde el inicio, {indice - max_visible + 1} veces)")
-                    
+                                        
                     # 1. Hacer click en la primera fila para asegurar foco en la grilla
                     mouse.click(coords=(x, y_first))
                     time.sleep(0.5)
@@ -1722,7 +1693,6 @@ def obtener_cuenta_contable_grilla(app, y):
             pass
 
     if x is None:
-        print("NO SE ENCONTRO LA COLUMNA Nro. Cta.")
         return None
 
     # Click directo en la celda de la columna "Nro. Cta." en la fila actual
@@ -1956,11 +1926,9 @@ def tiene_movimientos(app, timeout=8):
 
                 if "Resultado :" in texto:
                     texto_lower = texto.lower()
-                    print("EVALUANDO ETIQUETA RESULTADO:", texto)
 
                     # Si NO tiene '0 fila' ni '0 filas', pero sí menciona 'fila', definitivamente hay movimientos
                     if ("fila" in texto_lower) and ("0 fila" not in texto_lower) and ("0 filas" not in texto_lower):
-                        print("MOVIMIENTOS DETECTADOS (>0 filas):", texto)
                         return True
             except Exception:
                 pass
@@ -1974,13 +1942,11 @@ def tiene_movimientos(app, timeout=8):
             if "Resultado :" in texto:
                 texto_lower = texto.lower()
                 if "0 fila" in texto_lower or "0 filas" in texto_lower:
-                    print("SIN MOVIMIENTOS CONFIRMADO (0 filas):", texto)
                     return False
         except Exception:
             pass
 
     # Si por cualquier razón la interfaz no dio lectura clara, asumimos que SÍ hay movimientos
-    print("ASUMIENDO CON MOVIMIENTOS (para prevenir cierres accidentales)")
     return True
 
 
@@ -2027,13 +1993,7 @@ def procesar_empresa_anio(
     time.sleep(5)
 
     if not tiene_movimientos(app):
-
-        print(
-            f"SIN MOVIMIENTOS EN {anio_actual}"
-        )
-
         cerrar_aplicacion(app)
-
         return False
 
     print(
@@ -2077,13 +2037,9 @@ def cerrar_mensaje_tipo_cambio(app):
                     texto = ctrl.window_text().strip()
 
                     if "No se ha encontrado el tipo de cambio" in texto:
-
-                        print("MENSAJE TIPO CAMBIO DETECTADO")
-
                         for btn in ventana.descendants(control_type="Button"):
                             if btn.window_text().strip() == "Aceptar":
                                 btn.click_input()
-                                print("ACEPTAR TIPO CAMBIO - SOLICITANDO REINICIO")
                                 time.sleep(2)
                                 return "REINICIAR"
             except Exception:
@@ -2165,8 +2121,6 @@ def main():
                     cerrar_aplicacion(app)
                     time.sleep(3)
                     continue
-
-                print(f"MOVIMIENTOS ENCONTRADOS para {nombre_empresa} en {mes_actual:02d}/{anio_actual}")
 
                 send_keys("^c")
                 time.sleep(1)
@@ -2328,6 +2282,7 @@ def main():
     print("\n" + "="*60)
     print("PROCESO COMPLETADO PARA TODAS LAS EMPRESAS Y AÑOS")
     print("="*60)
+    generar_reporte_metricas()
 
 
 def cargar_data_excel():
