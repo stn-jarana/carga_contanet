@@ -292,7 +292,7 @@ directorio_trabajo = (
 # Define las 2 horas del día en que la app se reinicia sola (hora, minuto).
 HORAS_REINICIO_PROGRAMADO = [
     (1, 0),   # 1:0 AM
-    (23, 0),   # 11:00 PM
+    (0, 20),   # 00:20 AM
 ]
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -319,11 +319,15 @@ hojas_excel = {
 
 empresas = {
     "20506883301": "CMT",
-    "20606955724": "PERU COMMERCE",
     "20494530865": "DINSURA",
-    "20542813238": "IÑAPARI",
+    
+    "20514016624": "DYNAMITEX",
+    "20600692781": "DIONISO",
+    "20490242407": "INFOSUR",
+    "20606955724": "PERU COMMERCE",
+    "20504334041": "ITS",
     "20609254778": "TECA",
-    "20376729126": "STN"
+    "20542813238": "IÑAPARI"
 }
 
 FECHAS_INICIO = {
@@ -336,8 +340,8 @@ FECHAS_INICIO = {
 
 # Configuración del mes inicial por RUC y año (ej: STN desde febrero 2026 en adelante)
 MESES_INICIO = {
-    "20506883301": {  # STN
-        2026: 5       # En 2026 comenzar desde el mes 2 (febrero)
+    "20376729126": {  # STN
+        2026:  12      # En 2026 comenzar desde el mes 2 (febrero)
     }
 }
 
@@ -401,47 +405,25 @@ def forzar_cierre_procesos(nombre_exe="ContaNet.Aplicacion.exe"):
 def cerrar_aplicacion(app):
 
     try:
-
-        principal = app.window(
-            title_re=".*ContaNet ERP.*"
-        )
+        principal = app.window( title_re=".*ContaNet ERP.*" )
 
         principal.close()
-
         time.sleep(2)
 
         for ctrl in principal.descendants():
-
             try:
-
                 texto = ctrl.window_text().strip()
-
                 if texto == "Sí":
-
-                    print(
-                        "PULSANDO SI"
-                    )
-
                     ctrl.click_input()
-
-                    time.sleep(3)
-
+                    time.sleep(2)
                     break
-
             except:
                 pass
-
         else:
-            print(
-                "NO SE ENCONTRO BOTON SI"
-            )
+            print( "NO SE ENCONTRO BOTON SI" )
 
     except Exception as e:
-
-        print(
-            "Error cerrando aplicación:",
-            e
-        )
+        print("Error cerrando aplicación:", e)
 
     finally:
         # Siempre asegurarse de que no quede ninguna instancia abierta
@@ -491,9 +473,9 @@ def reiniciar_app_programado(app, ruc, anio_actual, mes_actual, dia_desde):
     seleccionar_empresa_y_anio(ventana_empresa_win, ruc, anio_actual)
     time.sleep(2)
     seleccionar_tesoreria_explorador(app)
-    time.sleep(5)
+    time.sleep(2)
     probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
-    time.sleep(7)
+    time.sleep(2)
     send_keys("^c")
     time.sleep(1)
     print(f"[REINICIO PROGRAMADO {hora_str}] Nueva instancia lista.")
@@ -1120,7 +1102,7 @@ def seleccionar_registro_y_modificar(app):
     if btn_modificar:
         btn_modificar.click_input()
 
-        time.sleep(5)
+        time.sleep(2)
 
     else:
 
@@ -1151,7 +1133,7 @@ def copiar_todo_asiento(app):
 
     if boton_copiar_todo:
         boton_copiar_todo.click_input()
-        time.sleep(5)
+        time.sleep(2)
 
     else:
 
@@ -1266,7 +1248,7 @@ def abrir_librito_cuenta_10(app):
     x = rect.left - 25
     y = rect.top + rect.height() // 2
     mouse.double_click(coords=(x, y))
-    time.sleep(5)
+    time.sleep(1)
 
 
 def completar_agregar_cuenta(app, numero_operacion):
@@ -1353,9 +1335,8 @@ def completar_agregar_cuenta(app, numero_operacion):
     # Aceptar
     #
     if boton_aceptar:
-
         boton_aceptar.click_input()
-        time.sleep(3)
+        time.sleep(1)
 
         # Verificar mensaje de error de cliente
         error_cliente = False
@@ -1426,7 +1407,7 @@ def guardar_asiento(app):
     if boton_guardar:
         boton_guardar.click_input()
 
-        time.sleep(5)
+        time.sleep(2)
 
 
 def limpiar_filtro_cuenta(app):
@@ -1480,7 +1461,7 @@ def copiar_todo_nuevamente(app):
 
             if "Copiar" in texto and "Todo" in texto:
                 ctrl.click_input()
-                time.sleep(5)
+                time.sleep(2)
 
                 return
 
@@ -1748,10 +1729,10 @@ def procesar_fila(app, numero_operacion):
 
 
     copiar_todo_asiento(app)
-    time.sleep(3)
+    time.sleep(1)
 
     filtrar_cuenta_10(app)
-    time.sleep(2)
+    time.sleep(1)
 
     abrir_librito_cuenta_10(app)
     time.sleep(2)
@@ -1771,7 +1752,7 @@ def procesar_fila(app, numero_operacion):
     time.sleep(2)
 
     copiar_todo_nuevamente(app)
-    time.sleep(3)
+    time.sleep(2)
 
     guardar_asiento(app)
     time.sleep(2)
@@ -1935,18 +1916,18 @@ def procesar_empresa_anio(
         anio_actual
     )
 
-    time.sleep(2)
+    time.sleep(1)
 
     seleccionar_tesoreria_explorador(app)
 
-    time.sleep(5)
+    time.sleep(2)
 
     probar_fechas(
         app,
         anio_actual
     )
 
-    time.sleep(5)
+    time.sleep(2)
 
     if not tiene_movimientos(app):
         cerrar_aplicacion(app)
@@ -2062,12 +2043,12 @@ def main():
                 time.sleep(2)
 
                 seleccionar_tesoreria_explorador(app)
-                time.sleep(5)
+                time.sleep(2)
 
                 dia_desde = FECHAS_INICIO.get(ruc, {}).get(anio_actual, {}).get(mes_actual, 1)
 
                 probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
-                time.sleep(7)
+                time.sleep(2)
 
                 # Si es un rango de días especial (como 28/01 a 31/01 en STN), omitimos el descarte para garantizar que procese
                 if dia_desde == 1 and not tiene_movimientos(app):
@@ -2075,7 +2056,7 @@ def main():
                     registrar_reporte(ruc, nombre_empresa, anio_actual, "N/A", "SIN MOVIMIENTOS", f"No hay registros en el mes {mes_actual:02d}", numero_operacion="")
                     marcar_mes_sin_movimientos(ruc, anio_actual, mes_actual)
                     cerrar_aplicacion(app)
-                    time.sleep(3)
+                    time.sleep(2)
                     continue
 
                 send_keys("^c")
@@ -2194,11 +2175,7 @@ def main():
                         )
                     
                     if resultado == "REINICIAR":
-                        print(f"REINICIANDO APLICACIÓN tras mensaje de tipo de cambio en asiento {asiento}")
-                        registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se detectó tipo de cambio (requirió reinicio)", numero_operacion=numero_operacion)
-                        registrar_asiento_procesado(ruc, anio_actual, mes_actual, asiento)
-                        fila += 1
-                        guardar_ultima_fila(ruc, anio_actual, mes_actual, fila)
+                        print(f"REINICIANDO APLICACIÓN tras mensaje de tipo de cambio en asiento {asiento} (se reintentará el mismo asiento)")
                         
                         cerrar_aplicacion(app)
                         time.sleep(3)
@@ -2212,9 +2189,9 @@ def main():
                         seleccionar_empresa_y_anio(ventana_empresa_win, ruc, anio_actual)
                         time.sleep(2)
                         seleccionar_tesoreria_explorador(app)
-                        time.sleep(5)
+                        time.sleep(3)
                         probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
-                        time.sleep(7)
+                        time.sleep(4)
                         send_keys("^c")
                         time.sleep(1)
                         continue
@@ -2227,7 +2204,7 @@ def main():
                         registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se completó la actualización", numero_operacion=numero_operacion)
                         
                     registrar_asiento_procesado(ruc, anio_actual, mes_actual, asiento)
-                    time.sleep(3)
+                    time.sleep(2)
                     fila += 1
                     guardar_ultima_fila(ruc, anio_actual, mes_actual, fila)
 
