@@ -209,30 +209,63 @@ def guardar_progreso(progreso):
 def _clave_mes(anio, mes):
     return f"{anio}_{mes:02d}"
 
-def registrar_asiento_procesado(ruc, anio, mes, asiento):
+def registrar_asiento_procesado(ruc, anio, asiento, mes=None):
     progreso = cargar_progreso()
     if ruc not in progreso:
         progreso[ruc] = {}
     
-    clave = _clave_mes(anio, mes)
-    if clave not in progreso[ruc]:
-        progreso[ruc][clave] = {"asientos": [], "ultima_fila": 0}
-    
-    if isinstance(progreso[ruc][clave], list):
-        progreso[ruc][clave] = {"asientos": progreso[ruc][clave], "ultima_fila": 0}
+    clave_anio = str(anio)
+    if clave_anio not in progreso[ruc]:
+        progreso[ruc][clave_anio] = {"asientos": [], "ultima_fila": 0}
+    if isinstance(progreso[ruc][clave_anio], list):
+        progreso[ruc][clave_anio] = {"asientos": progreso[ruc][clave_anio], "ultima_fila": 0}
         
-    if asiento not in progreso[ruc][clave]["asientos"]:
-        progreso[ruc][clave]["asientos"].append(asiento)
-        guardar_progreso(progreso)
+    if asiento not in progreso[ruc][clave_anio]["asientos"]:
+        progreso[ruc][clave_anio]["asientos"].append(asiento)
 
-def es_asiento_procesado(ruc, anio, mes, asiento):
+    if mes is not None:
+        try:
+            clave_mes = _clave_mes(anio, int(mes))
+            if clave_mes not in progreso[ruc]:
+                progreso[ruc][clave_mes] = {"asientos": [], "ultima_fila": 0}
+            if isinstance(progreso[ruc][clave_mes], list):
+                progreso[ruc][clave_mes] = {"asientos": progreso[ruc][clave_mes], "ultima_fila": 0}
+            if asiento not in progreso[ruc][clave_mes]["asientos"]:
+                progreso[ruc][clave_mes]["asientos"].append(asiento)
+        except Exception:
+            pass
+
+    guardar_progreso(progreso)
+
+def es_asiento_procesado(ruc, anio, asiento, mes=None):
     progreso = cargar_progreso()
-    clave = _clave_mes(anio, mes)
-    if ruc in progreso and clave in progreso[ruc]:
-        dato = progreso[ruc][clave]
-        if isinstance(dato, list):
-            return asiento in dato
-        return asiento in dato.get("asientos", [])
+    if ruc not in progreso:
+        return False
+
+    clave_anio = str(anio)
+    if clave_anio in progreso[ruc]:
+        dato = progreso[ruc][clave_anio]
+        asientos_list = dato if isinstance(dato, list) else dato.get("asientos", [])
+        if asiento in asientos_list:
+            return True
+
+    if mes is not None:
+        try:
+            clave_mes = _clave_mes(anio, int(mes))
+            if clave_mes in progreso[ruc]:
+                dato = progreso[ruc][clave_mes]
+                asientos_list = dato if isinstance(dato, list) else dato.get("asientos", [])
+                if asiento in asientos_list:
+                    return True
+        except Exception:
+            pass
+
+    for k, dato in progreso[ruc].items():
+        if str(k).startswith(str(anio)):
+            asientos_list = dato if isinstance(dato, list) else dato.get("asientos", [])
+            if asiento in asientos_list:
+                return True
+
     return False
 
 def guardar_ultima_fila(ruc, anio, mes, fila):
@@ -317,10 +350,9 @@ hojas_excel = {
 }
 
 
-empresas = {
+empresas = { 
     "20506883301": "CMT",
     "20494530865": "DINSURA",
-    
     "20514016624": "DYNAMITEX",
     "20600692781": "DIONISO",
     "20490242407": "INFOSUR",
@@ -340,8 +372,8 @@ FECHAS_INICIO = {
 
 # Configuración del mes inicial por RUC y año (ej: STN desde febrero 2026 en adelante)
 MESES_INICIO = {
-    "20376729126": {  # STN
-        2026:  12      # En 2026 comenzar desde el mes 2 (febrero)
+    "20506883301": {  # STN
+        2025: 1      # En 2026 comenzar desde el mes 2 (febrero)
     }
 }
 
@@ -455,7 +487,7 @@ def debe_reiniciar_por_horario() -> bool:
     return False
 
 
-def reiniciar_app_programado(app, ruc, anio_actual, mes_actual, dia_desde):
+def reiniciar_app_programado(app, ruc, anio_actual, mes_actual=None, dia_desde=1, mes_desde=1):
     """Cierra la instancia actual y vuelve a iniciarla en el mismo punto.
     Retorna el nuevo objeto `app` listo para continuar."""
     hora_str = datetime.now().strftime("%H:%M")
@@ -474,7 +506,7 @@ def reiniciar_app_programado(app, ruc, anio_actual, mes_actual, dia_desde):
     time.sleep(2)
     seleccionar_tesoreria_explorador(app)
     time.sleep(2)
-    probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
+    probar_fechas(app, anio_actual, mes_actual=mes_actual, dia_desde=dia_desde, mes_desde=mes_desde)
     time.sleep(2)
     send_keys("^c")
     time.sleep(1)
@@ -998,7 +1030,7 @@ def seleccionar_tesoreria_explorador(app):
         hacer_click_relativo(ventana_tesoreria, 0.08, 0.30, doble=True)
 
 
-def probar_fechas(app, anio_actual, mes_actual, dia_desde=1):
+def probar_fechas(app, anio_actual, mes_actual=None, dia_desde=1, mes_desde=1):
 
     principal = app.window(title_re=".*ContaNet ERP.*")
 
@@ -1023,9 +1055,13 @@ def probar_fechas(app, anio_actual, mes_actual, dia_desde=1):
         except Exception:
             pass
 
-    ultimo_dia = calendar.monthrange(int(anio_actual), int(mes_actual))[1]
-    str_fec_desde = f"{int(dia_desde):02d}/{mes_actual:02d}/{anio_actual}"
-    str_fec_hasta = f"{ultimo_dia:02d}/{mes_actual:02d}/{anio_actual}"
+    if mes_actual is not None:
+        ultimo_dia = calendar.monthrange(int(anio_actual), int(mes_actual))[1]
+        str_fec_desde = f"{int(dia_desde):02d}/{int(mes_actual):02d}/{anio_actual}"
+        str_fec_hasta = f"{ultimo_dia:02d}/{int(mes_actual):02d}/{anio_actual}"
+    else:
+        str_fec_desde = f"{int(dia_desde):02d}/{int(mes_desde):02d}/{anio_actual}"
+        str_fec_hasta = f"31/12/{anio_actual}"
 
     # FECHA DESDE
     if fec_desde:
@@ -1077,6 +1113,7 @@ def probar_fechas(app, anio_actual, mes_actual, dia_desde=1):
     # ACTUALIZAR
     if btn_actualizar:
         btn_actualizar.click_input()
+        time.sleep(2)
 
 
 def seleccionar_registro_y_modificar(app):
@@ -1508,6 +1545,127 @@ def aceptar_mensaje_sistema(app):
         time.sleep(2)
     else:
         print("NO SE ENCONTRO EL MENSAJE")
+
+
+def normalizar_df_excel(df_origen):
+    """Normaliza nombres de columnas y tipos de datos del DataFrame de Excel."""
+    if df_origen is None or df_origen.empty:
+        return pd.DataFrame()
+    
+    df = df_origen.copy()
+    nuevas_cols = {}
+    for col in df.columns:
+        c_str = str(col).strip().lower()
+        if "asiento" in c_str:
+            nuevas_cols[col] = "Asiento Contable"
+        elif ("a" in c_str and "o" in c_str and len(c_str) <= 4) or c_str in ["año", "ao"]:
+            nuevas_cols[col] = "Año"
+        elif "mes" in c_str:
+            nuevas_cols[col] = "Mes"
+        elif "operaci" in c_str or "operac" in c_str:
+            nuevas_cols[col] = "Número de Operación"
+    
+    df = df.rename(columns=nuevas_cols)
+    
+    if "Asiento Contable" in df.columns:
+        df["Asiento Contable"] = df["Asiento Contable"].astype(str).str.strip()
+    if "Año" in df.columns:
+        df["Año"] = pd.to_numeric(df["Año"], errors="coerce")
+    if "Mes" in df.columns:
+        df["Mes"] = pd.to_numeric(df["Mes"], errors="coerce")
+    if "Número de Operación" in df.columns:
+        df["Número de Operación"] = df["Número de Operación"].astype(str).str.strip()
+        
+    return df
+
+
+def limpiar_filtro_asiento(app):
+    """Limpia el texto escrito en la caja de búsqueda de 'Reg. Ctb.'"""
+    principal = app.window(title_re=".*ContaNet ERP.*")
+    for ctrl in principal.descendants():
+        try:
+            texto = ctrl.window_text().strip()
+            if texto == "Reg. Ctb.":
+                rect = ctrl.rectangle()
+                x = rect.left + rect.width() // 2
+                y_filtro = rect.bottom + 22
+                mouse.click(coords=(x, y_filtro))
+                time.sleep(0.2)
+                send_keys("^a{BACKSPACE}")
+                time.sleep(0.4)
+                break
+        except Exception:
+            pass
+
+
+def buscar_asiento_en_grilla(app, asiento):
+    """Escribe el asiento en el cuadro de búsqueda encima de la grilla (columna 'Reg. Ctb.'),
+    espera el autofiltrado de ContaNet, y valida si la primera fila corresponde al asiento.
+    
+    Retorna: (encontrado: bool, cuenta: str or None, y_coord: int or None)
+    """
+    principal = app.window(title_re=".*ContaNet ERP.*")
+    try:
+        principal.set_focus()
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+    x_col = None
+    y_filtro = None
+    y_fila1 = None
+
+    for ctrl in principal.descendants():
+        try:
+            texto = ctrl.window_text().strip()
+            if texto == "Reg. Ctb.":
+                rect = ctrl.rectangle()
+                x_col = rect.left + rect.width() // 2
+                y_filtro = rect.bottom + 22
+                y_fila1 = rect.bottom + 55
+                break
+        except Exception:
+            pass
+
+    if x_col is None:
+        print("NO SE ENCONTRO LA COLUMNA Reg. Ctb.")
+        return False, None, None
+
+    # 1. Clic en la caja de búsqueda encima del primer asiento
+    mouse.click(coords=(x_col, y_filtro))
+    time.sleep(0.3)
+
+    # 2. Limpiar contenido previo y escribir el número de asiento
+    send_keys("^a{BACKSPACE}")
+    time.sleep(0.2)
+    send_keys(asiento)
+    time.sleep(1.5)  # Espera para que ContaNet filtre de forma automática
+
+    # 3. Clic y doble clic en la primera fila para seleccionarla
+    mouse.click(coords=(x_col, y_fila1))
+    time.sleep(0.3)
+    mouse.double_click(coords=(x_col, y_fila1))
+    time.sleep(0.5)
+
+    # 4. Validar el asiento contable obtenido de la primera fila
+    asiento_leido = obtener_asiento_contable(app, y_fila1)
+    if not asiento_leido or asiento_leido.strip().upper() != asiento.strip().upper():
+        print(f"Asiento '{asiento}' no encontrado en ContaNet (primera fila muestra '{asiento_leido}')")
+        return False, None, y_fila1
+
+    # 5. Obtener la cuenta contable de la grilla
+    cuenta_raw = obtener_cuenta_contable_grilla(app, y_fila1)
+    cuenta = None
+    if cuenta_raw:
+        palabras = str(cuenta_raw).split()
+        for p in palabras:
+            if p.startswith("10."):
+                cuenta = p
+                break
+        if not cuenta:
+            cuenta = str(cuenta_raw)[:20]
+
+    return True, cuenta, y_fila1
 
 
 def seleccionar_fila_reg_ctb(app, indice):
@@ -2000,217 +2158,198 @@ def main():
         print(f"EMPRESA: {nombre_empresa} (RUC: {ruc})")
         print(f"{'='*60}")
 
+        df_empresa = normalizar_df_excel(excel_data[hoja_excel])
+        if df_empresa.empty:
+            print(f"No hay registros válidos en la hoja {hoja_excel}.")
+            continue
+
         for anio_actual in anios:
             print(f"\n--- Procesando {nombre_empresa} | Año {anio_actual} ---")
 
-            for mes_actual in range(1, 13):
-                mes_inicio = MESES_INICIO.get(ruc, {}).get(anio_actual, 1)
-                if mes_actual < mes_inicio:
-                    print(f"Saltando mes {mes_actual:02d}/{anio_actual} para {nombre_empresa} por configuración (inicia en mes {mes_inicio:02d}).")
-                    continue
+            # Filtrar los registros del Excel para este año
+            df_anio = df_empresa[
+                (df_empresa["Año"] == int(anio_actual)) &
+                (df_empresa["Asiento Contable"].notna()) &
+                (df_empresa["Asiento Contable"] != "") &
+                (df_empresa["Asiento Contable"] != "nan")
+            ]
 
-                print(f"\n--- Procesando Mes {mes_actual:02d}/{anio_actual} ---")
+            if df_anio.empty:
+                print(f"Sin asientos en Excel para {nombre_empresa} en el año {anio_actual}, saltando año.")
+                continue
 
-                if es_mes_sin_movimientos(ruc, anio_actual, mes_actual):
-                    print(f"Mes {mes_actual:02d}/{anio_actual} ya fue revisado y no tiene movimientos, saltando.")
-                    continue
+            # Identificar asientos pendientes
+            asientos_pendientes = []
+            for _, row_excel in df_anio.iterrows():
+                asiento_str = str(row_excel["Asiento Contable"]).strip()
+                mes_row = int(row_excel["Mes"]) if "Mes" in row_excel and pd.notna(row_excel["Mes"]) else None
+                if not es_asiento_procesado(ruc, anio_actual, asiento_str, mes=mes_row):
+                    asientos_pendientes.append(row_excel)
 
-                app = iniciar_aplicacion()
+            if not asientos_pendientes:
+                print(f"Todos los asientos del año {anio_actual} ({len(df_anio)} asientos) ya fueron procesados previamente.")
+                continue
 
-                ventana_login = obtener_ventana(app)
-                print("Ventana detectada:", ventana_login.window_text())
-                time.sleep(1)
+            print(f"\n--- Año {anio_actual}: {len(asientos_pendientes)} asientos pendientes por procesar ---")
 
-                ventana_login = app.window(title_re=".*Login.*")
-                iniciar_sesion(ventana_login)
-                time.sleep(2)
+            app = iniciar_aplicacion()
 
+            ventana_login = obtener_ventana(app)
+            print("Ventana detectada:", ventana_login.window_text())
+            time.sleep(1)
+
+            ventana_login = app.window(title_re=".*Login.*")
+            iniciar_sesion(ventana_login)
+            time.sleep(2)
+
+            try:
+                ventana_empresa_win = app.window(title_re=".*Seleccionar Empresa.*")
+            except Exception as exc:
+                print(f"No se encontró la ventana de selección de empresa: {exc}")
                 try:
-                    ventana_empresa_win = app.window(title_re=".*Seleccionar Empresa.*")
-                except Exception as exc:
-                    print(f"No se encontró la ventana de selección de empresa: {exc}")
-                    try:
-                        cerrar_aplicacion(app)
-                    except Exception:
-                        pass
-                    continue
-
-                seleccionar_empresa_y_anio(
-                    ventana_empresa_win,
-                    ruc,
-                    anio_actual
-                )
-                time.sleep(2)
-
-                seleccionar_tesoreria_explorador(app)
-                time.sleep(2)
-
-                dia_desde = FECHAS_INICIO.get(ruc, {}).get(anio_actual, {}).get(mes_actual, 1)
-
-                probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
-                time.sleep(2)
-
-                # Si es un rango de días especial (como 28/01 a 31/01 en STN), omitimos el descarte para garantizar que procese
-                if dia_desde == 1 and not tiene_movimientos(app):
-                    print(f"SIN MOVIMIENTOS para {nombre_empresa} en {mes_actual:02d}/{anio_actual}, pasando al siguiente mes.")
-                    registrar_reporte(ruc, nombre_empresa, anio_actual, "N/A", "SIN MOVIMIENTOS", f"No hay registros en el mes {mes_actual:02d}", numero_operacion="")
-                    marcar_mes_sin_movimientos(ruc, anio_actual, mes_actual)
                     cerrar_aplicacion(app)
-                    time.sleep(2)
+                except Exception:
+                    pass
+                continue
+
+            seleccionar_empresa_y_anio(
+                ventana_empresa_win,
+                ruc,
+                anio_actual
+            )
+            time.sleep(2)
+
+            seleccionar_tesoreria_explorador(app)
+            time.sleep(2)
+
+            mes_inicio_conf = MESES_INICIO.get(ruc, {}).get(anio_actual, 1)
+            dia_inicio_conf = FECHAS_INICIO.get(ruc, {}).get(anio_actual, {}).get(mes_inicio_conf, 1)
+
+            probar_fechas(app, anio_actual, dia_desde=dia_inicio_conf, mes_desde=mes_inicio_conf)
+            time.sleep(4)  # Esperar a que ContaNet termine de consultar y llenar la grilla
+
+            send_keys("^c")
+            time.sleep(1)
+
+            print(f"TRABAJANDO CON {nombre_empresa} AÑO {anio_actual} ({len(asientos_pendientes)} asientos pendientes)")
+
+            for row in asientos_pendientes:
+                asiento = str(row["Asiento Contable"]).strip()
+                num_op_raw = str(row.get("Número de Operación", "")).strip()
+                mes_row = int(row["Mes"]) if "Mes" in row and pd.notna(row["Mes"]) else None
+
+                # ── Reinicio programado ──────────────────────────────────
+                if debe_reiniciar_por_horario():
+                    app = reiniciar_app_programado(
+                        app, ruc, anio_actual, dia_desde=dia_inicio_conf, mes_desde=mes_inicio_conf
+                    )
+                # ────────────────────────────────────────────────────────
+
+                if es_asiento_procesado(ruc, anio_actual, asiento, mes=mes_row):
+                    print(f"ASIENTO {asiento} ya procesado anteriormente, saltando.")
                     continue
 
-                send_keys("^c")
+                # Validar número de operación
+                try:
+                    int(num_op_raw)
+                    numero_operacion = num_op_raw
+                except (ValueError, TypeError):
+                    print(f"NÚMERO DE OPERACIÓN NO VÁLIDO '{num_op_raw}' para asiento {asiento}, saltando.")
+                    registrar_reporte(
+                        ruc,
+                        nombre_empresa,
+                        anio_actual,
+                        asiento,
+                        "NO MODIFICADO",
+                        "El número de operación no es un valor numérico válido",
+                        numero_operacion=""
+                    )
+                    registrar_asiento_procesado(ruc, anio_actual, asiento, mes=mes_row)
+                    continue
+
+                print(f"\n[BUSCANDO EN CONTANET] Asiento: {asiento} | N° Operación: {numero_operacion}")
+
+                encontrado, cuenta, y_coord = buscar_asiento_en_grilla(app, asiento)
+
+                if not encontrado:
+                    print(f"ASIENTO {asiento} NO ENCONTRADO EN CONTANET para año {anio_actual}")
+                    registrar_reporte(
+                        ruc,
+                        nombre_empresa,
+                        anio_actual,
+                        asiento,
+                        "NO ENCONTRADO",
+                        "No se encontró el asiento en ContaNet",
+                        numero_operacion=numero_operacion
+                    )
+                    registrar_asiento_procesado(ruc, anio_actual, asiento, mes=mes_row)
+                    limpiar_filtro_asiento(app)
+                    time.sleep(0.5)
+                    continue
+
+                # Verificar si la cuenta empieza con 10.4
+                is_10_4 = bool(cuenta and ("10.4." in cuenta or cuenta.startswith("10.4")))
+                if not is_10_4:
+                    print(f"ASIENTO {asiento} NO PROCESADO: La cuenta '{cuenta}' no empieza con 10.4.xxx")
+                    registrar_reporte(
+                        ruc,
+                        nombre_empresa,
+                        anio_actual,
+                        asiento,
+                        "NO MODIFICADO",
+                        f"Cuenta '{cuenta}' no empieza con 10.4",
+                        numero_operacion=numero_operacion
+                    )
+                    registrar_asiento_procesado(ruc, anio_actual, asiento, mes=mes_row)
+                    limpiar_filtro_asiento(app)
+                    time.sleep(0.5)
+                    continue
+
+                print(f"PROCESANDO ASIENTO: {asiento} (Cuenta: {cuenta})")
+                resultado = procesar_fila(app, numero_operacion)
+
+                if resultado == "REINICIAR":
+                    print(f"REINICIANDO TRAS MENSAJE DE TIPO DE CAMBIO en asiento {asiento}")
+                    cerrar_aplicacion(app)
+                    time.sleep(3)
+
+                    app = iniciar_aplicacion()
+                    ventana_login = obtener_ventana(app)
+                    ventana_login = app.window(title_re=".*Login.*")
+                    iniciar_sesion(ventana_login)
+                    time.sleep(2)
+                    ventana_empresa_win = app.window(title_re=".*Seleccionar Empresa.*")
+                    seleccionar_empresa_y_anio(ventana_empresa_win, ruc, anio_actual)
+                    time.sleep(2)
+                    seleccionar_tesoreria_explorador(app)
+                    time.sleep(3)
+                    probar_fechas(app, anio_actual, dia_desde=dia_inicio_conf, mes_desde=mes_inicio_conf)
+                    time.sleep(4)
+                    send_keys("^c")
+                    time.sleep(1)
+                    # Reintentar el mismo asiento
+                    encontrado_retry, cuenta_retry, y_retry = buscar_asiento_en_grilla(app, asiento)
+                    if encontrado_retry:
+                        resultado = procesar_fila(app, numero_operacion)
+
+                if resultado == "PERIODO CERRADO":
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Periodo cerrado", numero_operacion=numero_operacion)
+                elif resultado == "VOUCHER NO MODIFICABLE":
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Voucher no modificable", numero_operacion=numero_operacion)
+                elif resultado == "ASIGNADO A CAJA":
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El asiento contable ha sido asignado a caja", numero_operacion=numero_operacion)
+                elif resultado == "FALTA CLIENTE":
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Falta cliente", numero_operacion=numero_operacion)
+                else:
+                    registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se completó la actualización", numero_operacion=numero_operacion)
+
+                registrar_asiento_procesado(ruc, anio_actual, asiento, mes=mes_row)
+                limpiar_filtro_asiento(app)
                 time.sleep(1)
 
-                print(f"TRABAJANDO CON {nombre_empresa} AÑO {anio_actual} MES {mes_actual:02d}")
-
-                ultimo_asiento = None
-                ultima_cuenta = None
-                ultimo_asiento_procesado = None
-                repetidos = 0
-                filas_estancadas = 0
-                fila = obtener_ultima_fila(ruc, anio_actual, mes_actual)
-                if fila > 0:
-                    print(f"REANUDANDO DESDE FILA {fila + 1} (progreso guardado)")
-                while True:
-                    # ── Reinicio programado ──────────────────────────────────
-                    if debe_reiniciar_por_horario():
-                        app = reiniciar_app_programado(
-                            app, ruc, anio_actual, mes_actual, dia_desde
-                        )
-                    # ────────────────────────────────────────────────────────
-
-                    y_coord = seleccionar_fila_reg_ctb(app, fila)
-                    if not y_coord:
-                        print(f"No se pudo seleccionar fila {fila}, terminando este mes.")
-                        break
-
-                    time.sleep(0.5)
-
-                    cuenta_raw = obtener_cuenta_contable_grilla(app, y_coord)
-                    
-                    cuenta = None
-                    is_10_4 = False
-                    if cuenta_raw:
-                        palabras = str(cuenta_raw).split()
-                        for p in palabras:
-                            if p.startswith("10."):
-                                cuenta = p
-                                if p.startswith("10.4."):
-                                    is_10_4 = True
-                                break
-                        if not cuenta:
-                            cuenta = str(cuenta_raw)[:20]
-
-                    asiento = obtener_asiento_contable(app, y_coord)
-
-                    if cuenta == ultima_cuenta and asiento is not None and asiento == ultimo_asiento:
-                        filas_estancadas += 1
-                        if filas_estancadas >= 3:
-                            print("Se alcanzó el final de la grilla (la fila no avanza).")
-                            break
-                    else:
-                        filas_estancadas = 0
-
-                    ultima_cuenta = cuenta
-                    if asiento is not None:
-                        ultimo_asiento = asiento
-
-                    if not is_10_4:
-                        print(f"FILA {fila + 1} NO PROCESADO: La cuenta {cuenta} no empieza con 10.4.xxx")
-                        fila += 1
-                        guardar_ultima_fila(ruc, anio_actual, mes_actual, fila)
-                        continue
-                    
-                    print(f"EVALUANDO: Cuenta {cuenta} | Asiento {asiento}")
-                    
-                    if asiento == ultimo_asiento_procesado:
-                        repetidos += 1
-                        if repetidos >= 3:
-                            print("Se alcanzó el límite (mismo asiento 3 veces consecutivas para cuentas 10.4).")
-                            break
-                        else:
-                            print(f"Asiento repetido {repetidos} vez/veces, saltando para ver si la grilla avanza...")
-                    else:
-                        repetidos = 0
-                    
-                    ultimo_asiento_procesado = asiento
-
-                    if es_asiento_procesado(ruc, anio_actual, mes_actual, asiento):
-                        print(f"FILA {fila + 1} ASIENTO {asiento} ya procesado anteriormente, saltando.")
-                        fila += 1
-                        guardar_ultima_fila(ruc, anio_actual, mes_actual, fila)
-                        continue
-
-                    numero_operacion, error_operacion = buscar_numero_operacion(
-                        hoja_excel,
-                        asiento,
-                        anio_actual
-                    )
-                    print("NUMERO OPERACION:", numero_operacion)
-
-                    if numero_operacion is None:
-                        if error_operacion == "NO_ES_NUMERO":
-                            print(f"NÚMERO DE OPERACIÓN NO VÁLIDO (no es numérico) para asiento {asiento}, saltando fila.")
-                            registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El número de operación no es un valor numérico válido", numero_operacion="")
-                        else:
-                            print("NO ENCONTRADO EN EXCEL, saltando fila.")
-                            registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "No se encontró el número de operación en el Excel", numero_operacion="")
-                        registrar_asiento_procesado(ruc, anio_actual, mes_actual, asiento)
-                        fila += 1
-                        guardar_ultima_fila(ruc, anio_actual, mes_actual, fila)
-                        continue
-
-                    resultado = procesar_fila(app, numero_operacion)
-
-                    if resultado == "PERIODO CERRADO":
-                        registrar_reporte(
-                            ruc,
-                            nombre_empresa,
-                            anio_actual,
-                            asiento,
-                            "NO MODIFICADO",
-                            "Periodo cerrado",
-                            numero_operacion=numero_operacion
-                        )
-                    
-                    if resultado == "REINICIAR":
-                        print(f"REINICIANDO APLICACIÓN tras mensaje de tipo de cambio en asiento {asiento} (se reintentará el mismo asiento)")
-                        
-                        cerrar_aplicacion(app)
-                        time.sleep(3)
-                        
-                        app = iniciar_aplicacion()
-                        ventana_login = obtener_ventana(app)
-                        ventana_login = app.window(title_re=".*Login.*")
-                        iniciar_sesion(ventana_login)
-                        time.sleep(2)
-                        ventana_empresa_win = app.window(title_re=".*Seleccionar Empresa.*")
-                        seleccionar_empresa_y_anio(ventana_empresa_win, ruc, anio_actual)
-                        time.sleep(2)
-                        seleccionar_tesoreria_explorador(app)
-                        time.sleep(3)
-                        probar_fechas(app, anio_actual, mes_actual, dia_desde=dia_desde)
-                        time.sleep(4)
-                        send_keys("^c")
-                        time.sleep(1)
-                        continue
-
-                    if resultado == "VOUCHER NO MODIFICABLE":
-                        registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "Voucher no modificable", numero_operacion=numero_operacion)
-                    elif resultado == "ASIGNADO A CAJA":
-                        registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "NO MODIFICADO", "El asiento contable ha sido asignado a caja", numero_operacion=numero_operacion)
-                    else:
-                        registrar_reporte(ruc, nombre_empresa, anio_actual, asiento, "ACTUALIZADO", "Se completó la actualización", numero_operacion=numero_operacion)
-                        
-                    registrar_asiento_procesado(ruc, anio_actual, mes_actual, asiento)
-                    time.sleep(2)
-                    fila += 1
-                    guardar_ultima_fila(ruc, anio_actual, mes_actual, fila)
-
-                print(f"Cerrando aplicación para {nombre_empresa} año {anio_actual} mes {mes_actual:02d}")
-                cerrar_aplicacion(app)
-                time.sleep(3)
+            print(f"Cerrando aplicación para {nombre_empresa} año {anio_actual}")
+            cerrar_aplicacion(app)
+            time.sleep(3)
 
     print("\n" + "="*60)
     print("PROCESO COMPLETADO PARA TODAS LAS EMPRESAS Y AÑOS")
