@@ -10,7 +10,7 @@ import subprocess
 import calendar
 import dotenv
 
-from datetime import datetime
+from datetime import datetime, time as dtime
 import sys
 
 dotenv.load_dotenv()  # Cargar variables de entorno desde .env
@@ -329,6 +329,16 @@ HORAS_REINICIO_PROGRAMADO = [
 ]
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ── Ventanas de pausa programada (actualización tipo de cambio) ───────────────
+# Define los rangos horarios en los que carga_contanet se suspende y cierra
+# ContaNet para dar exclusividad a Actualizar-tipo-de-cambio (6:00 pm y 11:00 pm).
+VENTANAS_PAUSA_TIPO_CAMBIO = [
+    (dtime(10, 00), dtime(10, 10)),
+    (dtime(17, 30), dtime(18, 30)),  # Pausa tarde: 5:30 PM a 6:30 PM (Actualización 6:00 PM)
+    (dtime(22, 30), dtime(23, 30)),  # Pausa noche: 10:30 PM a 11:30 PM (Actualización 11:00 PM)
+]
+# ──────────────────────────────────────────────────────────────────────────────
+
 EXCEL_FILE = r"\\192.168.30.36\Tesoreria\TESORERIA\CONSTANCIAS DE PAGO\constancias_de_pago.xlsx"
 
 excel_data = pd.read_excel(
@@ -351,11 +361,12 @@ hojas_excel = {
 
 
 empresas = { 
-    "20506883301": "CMT",
+    
     "20494530865": "DINSURA",
     "20514016624": "DYNAMITEX",
     "20600692781": "DIONISO",
     "20490242407": "INFOSUR",
+    "20506883301": "CMT",
     "20606955724": "PERU COMMERCE",
     "20504334041": "ITS",
     "20609254778": "TECA",
@@ -363,9 +374,9 @@ empresas = {
 }
 
 FECHAS_INICIO = {
-    "20376729126": {  # STN
-        2026: {
-            1: 30   # enero 2026: iniciar desde el día 28
+    "20506883301": {  # STN
+        2025: {
+            1: 1   # enero 2026: iniciar desde el día 28
         }
     }
 }
@@ -512,6 +523,58 @@ def reiniciar_app_programado(app, ruc, anio_actual, mes_actual=None, dia_desde=1
     time.sleep(1)
     print(f"[REINICIO PROGRAMADO {hora_str}] Nueva instancia lista.")
     return app
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+# ── Helpers de pausa programada (tipo de cambio) ──────────────────────────────
+def esta_en_horario_pausa(hora_actual=None):
+    """Verifica si la hora actual cae dentro de alguna de las ventanas de pausa programadas."""
+    if hora_actual is None:
+        hora_actual = datetime.now().time()
+    for inicio, fin in VENTANAS_PAUSA_TIPO_CAMBIO:
+        if inicio <= hora_actual <= fin:
+            return True, fin
+    return False, None
+
+
+def esperar_si_es_horario_pausa(app=None):
+    """
+    Si la hora actual está dentro de una ventana de pausa (ej: 17:30-18:30 o 22:30-23:30):
+    1. Cierra ContaNet de forma limpia y segura.
+    2. Entra en reposo hasta que termine la ventana de actualización de tipo de cambio.
+    3. Retorna True si estuvo en pausa (para que el llamador reinicie la app).
+    """
+    en_pausa, hora_fin = esta_en_horario_pausa()
+    if not en_pausa:
+        return False
+
+    hora_actual_str = datetime.now().strftime("%H:%M:%S")
+    hora_fin_str = hora_fin.strftime("%H:%M:%S")
+    print(f"\n{'='*70}")
+    print(f"[PAUSA PROGRAMADA] Entrando en horario de actualización de tipo de cambio.")
+    print(f"[PAUSA PROGRAMADA] Hora actual: {hora_actual_str} | Reanudación programada: {hora_fin_str}")
+    print(f"{'='*70}\n")
+
+    if app is not None:
+        try:
+            print("[PAUSA PROGRAMADA] Cerrando ContaNet de forma segura...")
+            cerrar_aplicacion(app)
+        except Exception as e:
+            print(f"[PAUSA PROGRAMADA] Error al cerrar aplicación: {e}. Forzando cierre...")
+            forzar_cierre_procesos()
+
+    while True:
+        en_pausa_actual, _ = esta_en_horario_pausa()
+        if not en_pausa_actual:
+            break
+        print(f"[PAUSA PROGRAMADA] En espera de finalización ({datetime.now().strftime('%H:%M:%S')})... Reanuda a las {hora_fin_str}")
+        time.sleep(30)
+
+    print(f"\n{'='*70}")
+    print(f"[PAUSA PROGRAMADA] Finalizó la ventana de pausa ({datetime.now().strftime('%H:%M:%S')}).")
+    print(f"[PAUSA PROGRAMADA] Reanudando carga de datos...")
+    print(f"{'='*70}\n")
+    return True
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -2192,6 +2255,9 @@ def main():
 
             print(f"\n--- Año {anio_actual}: {len(asientos_pendientes)} asientos pendientes por procesar ---")
 
+            # Verificar si estamos en ventana de pausa programada antes de abrir ContaNet
+            esperar_si_es_horario_pausa()
+
             app = iniciar_aplicacion()
 
             ventana_login = obtener_ventana(app)
@@ -2237,6 +2303,15 @@ def main():
                 asiento = str(row["Asiento Contable"]).strip()
                 num_op_raw = str(row.get("Número de Operación", "")).strip()
                 mes_row = int(row["Mes"]) if "Mes" in row and pd.notna(row["Mes"]) else None
+
+                # ── Pausa programada para actualización de tipo de cambio ──
+                if esta_en_horario_pausa()[0]:
+                    esperar_si_es_horario_pausa(app)
+                    print(f"[PAUSA PROGRAMADA] Reabriendo ContaNet para {nombre_empresa} año {anio_actual}...")
+                    app = reiniciar_app_programado(
+                        app, ruc, anio_actual, dia_desde=dia_inicio_conf, mes_desde=mes_inicio_conf
+                    )
+                # ────────────────────────────────────────────────────────────
 
                 # ── Reinicio programado ──────────────────────────────────
                 if debe_reiniciar_por_horario():
@@ -2374,6 +2449,9 @@ if __name__ == "__main__":
 
     intento = 0
     while True:
+        # Si al iniciar o reintentar coincide con la ventana de tipo de cambio, espera a que termine
+        esperar_si_es_horario_pausa()
+
         intento += 1
         print(f"\n{'='*60}")
         print(f"[WATCHDOG] Iniciando ejecución (intento #{intento})")
